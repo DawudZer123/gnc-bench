@@ -58,6 +58,7 @@ class GPS(Sensor):
         vel = x[VEL] + self.rng.normal(0.0, self.vel_noise, 3)
         return np.concatenate([pos, vel])
 
+
 class Barometer(Sensor):
     """Altitude seule, à partir de la pression. Mesure : [altitude]."""
 
@@ -70,3 +71,23 @@ class Barometer(Sensor):
     def measure(self, t, x, dx, params):
         alt = x[POS][2] + self.rng.normal(0.0, self.alt_noise)
         return np.array([alt])
+
+
+class OpticalFlow(Sensor):
+    """Caméra pointée vers le sol + télémètre : mesure la vitesse horizontale dans le repère corps.
+
+    Un vrai capteur mesure le défilement des pixels (rad/s) ; multiplié par la hauteur
+    (télémètre), on obtient une vitesse. On simule directement ce résultat.
+    Mesure : [vx_corps, vy_corps].
+    """
+
+    name = "flow"
+
+    def __init__(self, rng, rate=50.0, vel_noise=0.05):
+        super().__init__(rng, rate)
+        self.vel_noise = vel_noise  # m/s
+
+    def measure(self, t, x, dx, params):
+        R = quat_to_rotmat(x[QUAT])
+        v_body = R.T @ x[VEL]
+        return v_body[:2] + self.rng.normal(0.0, self.vel_noise, 2)

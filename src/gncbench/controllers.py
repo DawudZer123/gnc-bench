@@ -19,7 +19,9 @@ class Controller:
 class HoverController(Controller):
     """Contrôleur en cascade : PID de position -> contrôle géométrique d'attitude (Lee et al., 2010).
 
-    reference : dict avec 'position' (3,) et, en option, 'yaw' (rad).
+    reference : dict avec 'position' (3,) et, en option, 'velocity' (3,), 'acceleration' (3,)
+                et 'yaw' (rad). Vitesse et accélération de référence servent d'anticipation
+                (feedforward) : sans elles, le drone suit une trajectoire avec du retard.
     """
 
     def __init__(self, params, dt, kp=6.0, kd=4.5, ki=0.3, k_att=0.6, k_rate=0.12,
@@ -46,7 +48,10 @@ class HoverController(Controller):
         if np.linalg.norm(err) < 0.3:
             lim = self.i_limit / self.ki if self.ki > 0 else 0.0
             self.int_err = np.clip(self.int_err + err * self.dt, -lim, lim)
-        a_des = self.kp * err - self.kd * v + self.ki * self.int_err + np.array([0, 0, g])
+        v_ref = reference.get("velocity", np.zeros(3))
+        a_ref = reference.get("acceleration", np.zeros(3))
+        a_des = (self.kp * err + self.kd * (v_ref - v) + self.ki * self.int_err
+                 + a_ref + np.array([0, 0, g]))
 
         # 2. Attitude désirée : l'axe z du corps pointe selon a_des.
         R = quat_to_rotmat(q)
