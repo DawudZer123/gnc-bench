@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from gncbench.controllers import HoverController
-from gncbench.dynamics import POS, QUAT, initial_state
+from gncbench.dynamics import POS, QUAT, initial_state, MOTORS
 from gncbench.math3d import quat_from_euler, quat_to_euler
 from gncbench.params import QuadParams
 from gncbench.sim import simulate
@@ -38,7 +38,10 @@ def main():
         ax[1].plot(res.t, euler[:, i], label=name)
     ax[1].set_ylabel("Attitude (°)")
     ax[1].legend()
-    ax[2].plot(res.t, res.rotors)
+    for i in range(4):
+        ax[2].plot(res.t, res.rotors[:, i], lw=0.8, ls="--", color=f"C{i}")
+        ax[2].plot(res.t, res.states[:, MOTORS][:, i], color=f"C{i}", label=f"rotor {i}")
+    ax[2].legend()                # poussée réelle
     ax[2].set_ylabel("Poussée rotors (N)")
     ax[2].set_xlabel("Temps (s)")
     fig.suptitle("Semaine 1 : vol stationnaire")

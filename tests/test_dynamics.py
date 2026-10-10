@@ -72,3 +72,12 @@ def test_hover_controller_reaches_target():
     assert np.linalg.norm(final[POS] - ref["position"]) < 0.01
     assert np.isclose(quat_to_euler(final[QUAT])[2], 0.5, atol=0.01)
     assert np.linalg.norm(final[VEL]) < 0.01
+
+def test_motor_step_response():
+    x = initial_state()               # moteurs à 0 N
+    cmd = np.full(4, 4.0)             # échelon de 4 N
+    dt = 0.001
+    for _ in range(30):               # 30 pas × 1 ms = tau
+        x = rk4_step(lambda s: state_derivative(s, cmd, P), x, dt)
+    expected = 4.0 * (1 - np.exp(-1))
+    assert np.allclose(x[MOTORS], expected, atol=1e-3)
