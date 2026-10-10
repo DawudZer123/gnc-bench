@@ -14,7 +14,7 @@ class QuadParams:
     )                                # kg·m²
     max_thrust: float = 8.0          # N par rotor (rapport poussée/poids ≈ 3,3)
     torque_coeff: float = 0.016      # m, couple de lacet = coeff × poussée
-    drag_coeff: float = 0.1          # N·s/m, traînée linéaire simple
+    drag_coeff: float = 0.3          # N·s/m, traînée linéaire simple
     gravity: float = 9.81            # m/s²
     motor_tau: float = 0.03          # s, constante de temps des moteurs
 

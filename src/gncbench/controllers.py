@@ -22,11 +22,13 @@ class HoverController(Controller):
     reference : dict avec 'position' (3,) et, en option, 'yaw' (rad).
     """
 
-    def __init__(self, params, dt, kp=6.0, kd=4.5, ki=0.3, k_att=0.6, k_rate=0.12):
+    def __init__(self, params, dt, kp=6.0, kd=4.5, ki=0.3, k_att=0.6, k_rate=0.12,
+                 i_limit=3.0):
         self.p = params
         self.dt = dt
         self.kp, self.kd, self.ki = kp, kd, ki
         self.k_att, self.k_rate = k_att, k_rate
+        self.i_limit = i_limit  # m/s², action maximale de l'intégrale
         self.mixer_inv = np.linalg.inv(params.mixer())
         self.reset()
 
@@ -42,7 +44,8 @@ class HoverController(Controller):
         # Anti-emballement : on n'intègre que près de la cible, sinon l'intégrale
         # accumulée pendant le décollage provoque un long dépassement.
         if np.linalg.norm(err) < 0.3:
-            self.int_err = np.clip(self.int_err + err * self.dt, -1.0, 1.0)
+            lim = self.i_limit / self.ki if self.ki > 0 else 0.0
+            self.int_err = np.clip(self.int_err + err * self.dt, -lim, lim)
         a_des = self.kp * err - self.kd * v + self.ki * self.int_err + np.array([0, 0, g])
 
         # 2. Attitude désirée : l'axe z du corps pointe selon a_des.
