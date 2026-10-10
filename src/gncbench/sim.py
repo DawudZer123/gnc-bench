@@ -19,7 +19,7 @@ def simulate(x0, controller, reference, params, duration, dt=0.002, ctrl_every=2
     """Simule `duration` secondes. Le contrôleur tourne tous les `ctrl_every` pas (ici 250 Hz)."""
     n = int(round(duration / dt))
     t = np.arange(n + 1) * dt
-    states = np.empty((n + 1, 13))
+    states = np.empty((n + 1, len(x0)))
     rotors = np.empty((n + 1, 4))
     x = np.array(x0, dtype=float)
     u = np.zeros(4)

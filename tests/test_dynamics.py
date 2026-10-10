@@ -6,6 +6,7 @@ from gncbench.integrators import rk4_step
 from gncbench.math3d import quat_from_euler, quat_to_euler, quat_to_rotmat
 from gncbench.params import QuadParams
 from gncbench.sim import simulate
+from gncbench.dynamics import MOTORS
 
 P = QuadParams()
 
@@ -29,6 +30,7 @@ def test_mixer_roundtrip():
 
 def test_hover_thrust_is_equilibrium():
     x = initial_state(position=(0, 0, 1))
+    x[MOTORS] = P.mass * P.gravity / 4
     dx = state_derivative(x, np.full(4, P.mass * P.gravity / 4), P)
     assert np.allclose(dx, 0.0, atol=1e-12)
 
