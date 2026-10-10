@@ -1,4 +1,4 @@
-"""Capteurs simulés. Chaque capteur a sa fréquence, un bruit blanc gaussien et parfois un biais."""
+"""Simulated sensors. Each sensor has its own rate, Gaussian white noise and sometimes a bias."""
 
 import numpy as np
 
@@ -7,12 +7,12 @@ from .math3d import quat_to_rotmat
 
 
 class Sensor:
-    """Interface commune : `measure` renvoie un vecteur de mesures à partir de l'état vrai."""
+    """Common interface: `measure` returns a measurement vector from the true state."""
 
-    name = "capteur"
+    name = "sensor"
 
     def __init__(self, rng, rate):
-        self.rng = rng      # générateur aléatoire (reproductible avec une graine)
+        self.rng = rng      # random generator (reproducible with a seed)
         self.rate = rate    # Hz
 
     def measure(self, t, x, dx, params):
@@ -20,7 +20,7 @@ class Sensor:
 
 
 class IMU(Sensor):
-    """Accéléromètre + gyroscope, dans le repère corps. Mesure : [ax, ay, az, gx, gy, gz]."""
+    """Accelerometer + gyroscope, in the body frame. Measurement: [ax, ay, az, gx, gy, gz]."""
 
     name = "imu"
 
@@ -29,14 +29,14 @@ class IMU(Sensor):
         super().__init__(rng, rate)
         self.accel_noise = accel_noise  # m/s²
         self.gyro_noise = gyro_noise    # rad/s
-        # Biais tiré une fois au démarrage, puis constant (comme une vraie IMU mal calibrée).
+        # Bias drawn once at start-up, then constant (like a real, poorly calibrated IMU).
         self.accel_bias = rng.normal(0.0, accel_bias, 3)
         self.gyro_bias = rng.normal(0.0, gyro_bias, 3)
 
     def measure(self, t, x, dx, params):
         R = quat_to_rotmat(x[QUAT])
-        # Un accéléromètre mesure la force spécifique : accélération moins gravité.
-        # Au repos, il lit donc +g vers le haut, pas zéro.
+        # An accelerometer measures specific force: acceleration minus gravity.
+        # At rest it therefore reads +g upward, not zero.
         specific_force = R.T @ (dx[VEL] + np.array([0.0, 0.0, params.gravity]))
         accel = specific_force + self.accel_bias + self.rng.normal(0.0, self.accel_noise, 3)
         gyro = x[OMEGA] + self.gyro_bias + self.rng.normal(0.0, self.gyro_noise, 3)
@@ -44,13 +44,13 @@ class IMU(Sensor):
 
 
 class GPS(Sensor):
-    """Position et vitesse dans le repère monde. Mesure : [px, py, pz, vx, vy, vz]."""
+    """Position and velocity in the world frame. Measurement: [px, py, pz, vx, vy, vz]."""
 
     name = "gps"
 
     def __init__(self, rng, rate=10.0, pos_noise=(0.5, 0.5, 1.0), vel_noise=0.1):
         super().__init__(rng, rate)
-        self.pos_noise = np.asarray(pos_noise)  # m (la verticale est moins précise)
+        self.pos_noise = np.asarray(pos_noise)  # m (vertical is less accurate)
         self.vel_noise = vel_noise              # m/s
 
     def measure(self, t, x, dx, params):
@@ -60,7 +60,7 @@ class GPS(Sensor):
 
 
 class Barometer(Sensor):
-    """Altitude seule, à partir de la pression. Mesure : [altitude]."""
+    """Altitude only, from air pressure. Measurement: [altitude]."""
 
     name = "baro"
 
@@ -74,11 +74,11 @@ class Barometer(Sensor):
 
 
 class OpticalFlow(Sensor):
-    """Caméra pointée vers le sol + télémètre : mesure la vitesse horizontale dans le repère corps.
+    """Downward-facing camera + rangefinder: measures horizontal velocity in the body frame.
 
-    Un vrai capteur mesure le défilement des pixels (rad/s) ; multiplié par la hauteur
-    (télémètre), on obtient une vitesse. On simule directement ce résultat.
-    Mesure : [vx_corps, vy_corps].
+    A real sensor measures how fast pixels move (rad/s); multiplied by the height
+    (rangefinder), this gives a velocity. We simulate that result directly.
+    Measurement: [vx_body, vy_body].
     """
 
     name = "flow"

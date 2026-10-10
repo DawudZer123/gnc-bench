@@ -24,7 +24,7 @@ def test_gusts_have_expected_statistics():
 
 
 def test_steady_wind_offset_without_integral():
-    # Sans intégrale, le vent est compensé par un écart de position : kp × e = c × w / m.
+    # Without integral, the wind is balanced by a position offset: kp × e = c × w / m.
     wind = Wind(np.random.default_rng(0), mean=(5.0, 0.0, 0.0), gust_std=0.0)
     res = simulate(hover_at_target(), HoverController(P, dt=0.004, ki=0.0), TARGET, P,
                    duration=10.0, wind=wind)

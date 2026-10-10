@@ -1,19 +1,19 @@
-"""Filtre de Kalman de navigation : fusionne IMU, GPS et baromètre.
+"""Navigation Kalman filter: fuses IMU, GPS and barometer.
 
-État estimé (9) : s = [p (3), v (3), b (3)]
-  p : position, repère monde (m)
-  v : vitesse, repère monde (m/s)
-  b : biais de l'accéléromètre, repère corps (m/s²)
+Estimated state (9): s = [p (3), v (3), b (3)]
+  p: position, world frame (m)
+  v: velocity, world frame (m/s)
+  b: accelerometer bias, body frame (m/s²)
 
-Capteur optionnel : flux optique (vitesse horizontale dans le repère corps), qui
-permet de garder une bonne vitesse, donc une position qui dérive lentement, sans GPS.
+Optional sensor: optical flow (horizontal velocity in the body frame), which keeps
+the velocity accurate, so the position drifts slowly, without GPS.
 
-Hypothèse : l'attitude est connue (fournie par un filtre d'attitude séparé).
-Avec cette hypothèse, le modèle est linéaire : c'est un filtre de Kalman classique.
+Assumption: the attitude is known (provided by a separate attitude filter).
+With this assumption the model is linear: it is a standard Kalman filter.
 
-Cycle :
-  - prédiction à chaque mesure IMU (250 Hz) : on intègre l'accélération mesurée ;
-  - correction à chaque mesure GPS (10 Hz) ou baromètre (50 Hz).
+Cycle:
+  - prediction at each IMU measurement (250 Hz): integrate the measured acceleration;
+  - correction at each GPS (10 Hz), barometer (50 Hz) or optical flow (50 Hz) measurement.
 """
 
 import numpy as np
@@ -29,7 +29,7 @@ class NavigationFilter:
                  bias_walk=1e-3, gps_noise=(0.5, 0.5, 1.0, 0.1, 0.1, 0.1), baro_noise=0.1, flow_noise=0.05):
         self.g = np.array([0.0, 0.0, params.gravity])
         self.s = np.concatenate([p0, v0, np.zeros(3)])
-        # Incertitude initiale : 1 m en position, 0,5 m/s en vitesse, 0,1 m/s² en biais.
+        # Initial uncertainty: 1 m in position, 0.5 m/s in velocity, 0.1 m/s² in bias.
         self.P = np.diag([1.0] * 3 + [0.25] * 3 + [0.01] * 3)
         self.accel_noise = accel_noise
         self.bias_walk = bias_walk
@@ -37,33 +37,33 @@ class NavigationFilter:
         self.R_baro = np.array([[baro_noise**2]])
         self.R_flow = np.eye(2) * flow_noise**2
 
-    # ----- Prédiction --------------------------------------------------------------
+    # ----- Prediction ----------------------------------------------------------------
     def predict(self, accel_meas, quat, dt):
         R = quat_to_rotmat(quat)
         p, v, b = self.s[P_], self.s[V_], self.s[B_]
-        a = R @ (accel_meas - b) - self.g          # accélération dans le repère monde
+        a = R @ (accel_meas - b) - self.g          # acceleration in the world frame
 
         self.s[P_] = p + v * dt + 0.5 * a * dt**2
         self.s[V_] = v + a * dt
 
-        # Jacobienne F = d(état suivant) / d(état actuel)
+        # Jacobian F = d(next state) / d(current state)
         F = np.eye(9)
         F[P_, V_] = I3 * dt
         F[P_, B_] = -0.5 * R * dt**2
         F[V_, B_] = -R * dt
 
-        # Bruit de processus : le bruit de l'accéléromètre entre dans la vitesse,
-        # le biais dérive lentement (marche aléatoire).
+        # Process noise: accelerometer noise enters the velocity,
+        # the bias drifts slowly (random walk).
         Q = np.zeros((9, 9))
         Q[V_, V_] = I3 * (self.accel_noise * dt) ** 2
         Q[B_, B_] = I3 * (self.bias_walk**2) * dt
         self.P = F @ self.P @ F.T + Q
 
-    # ----- Correction --------------------------------------------------------------
+    # ----- Correction ----------------------------------------------------------------
     def _correct(self, z, H, R_meas):
-        y = z - H @ self.s                         # innovation : mesure - prédiction
-        S = H @ self.P @ H.T + R_meas              # incertitude de l'innovation
-        K = self.P @ H.T @ np.linalg.inv(S)        # gain de Kalman
+        y = z - H @ self.s                         # innovation: measurement - prediction
+        S = H @ self.P @ H.T + R_meas              # innovation uncertainty
+        K = self.P @ H.T @ np.linalg.inv(S)        # Kalman gain
         self.s = self.s + K @ y
         self.P = (np.eye(9) - K @ H) @ self.P
 
@@ -79,15 +79,15 @@ class NavigationFilter:
         self._correct(z, H, self.R_baro)
 
     def update_flow(self, z, quat):
-        # Mesure = 2 premières composantes de R^T v : elle dépend de l'attitude.
+        # Measurement = first 2 components of R^T v: it depends on the attitude.
         R = quat_to_rotmat(quat)
         H = np.zeros((2, 9))
         H[:, V_] = R.T[:2, :]
         self._correct(z, H, self.R_flow)
 
-    # ----- Interface avec la simulation ----------------------------------------------
+    # ----- Interface with the simulation ---------------------------------------------
     def process(self, name, z, quat, dt):
-        """Traite une mesure. Une mesure NaN (capteur en panne) est ignorée."""
+        """Processes one measurement. A NaN measurement (failed sensor) is ignored."""
         if np.isnan(z).any():
             return
         if name == "imu":
@@ -109,5 +109,5 @@ class NavigationFilter:
 
     @property
     def position_std(self):
-        """Écart-type estimé de la position (m) : ce que le filtre pense de sa propre erreur."""
+        """Estimated position standard deviation (m): what the filter thinks of its own error."""
         return np.sqrt(np.diag(self.P)[P_])

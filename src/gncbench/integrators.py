@@ -1,4 +1,4 @@
-"""Intégrateur Runge-Kutta d'ordre 4."""
+"""Fourth-order Runge-Kutta integrator."""
 
 import numpy as np
 
@@ -6,7 +6,7 @@ from .dynamics import QUAT
 
 
 def rk4_step(f, x, dt):
-    """Un pas de RK4 pour dx/dt = f(x). Le quaternion est renormalisé à la fin."""
+    """One RK4 step for dx/dt = f(x). The quaternion is renormalized at the end."""
     k1 = f(x)
     k2 = f(x + 0.5 * dt * k1)
     k3 = f(x + 0.5 * dt * k2)

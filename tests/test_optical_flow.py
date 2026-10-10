@@ -15,9 +15,9 @@ P = QuadParams()
 
 def test_flow_measures_body_velocity():
     flow = OpticalFlow(np.random.default_rng(0), vel_noise=0.0)
-    x = initial_state(quat=quat_from_euler(0.0, 0.0, np.pi / 2))   # drone tourné de 90°
-    x[VEL] = [1.0, 0.0, 0.0]                                       # avance vers x (monde)
-    # Vu du drone, x monde est sur sa droite : vitesse corps = (0, -1).
+    x = initial_state(quat=quat_from_euler(0.0, 0.0, np.pi / 2))   # drone rotated by 90°
+    x[VEL] = [1.0, 0.0, 0.0]                                       # moving along world x
+    # Seen from the drone, world x is on its right: body velocity = (0, -1).
     assert np.allclose(flow.measure(0.0, x, None, P), [0.0, -1.0])
 
 
@@ -40,11 +40,11 @@ def fly(with_flow):
 
 def test_optical_flow_keeps_drone_in_corridor_without_gps():
     rep = tracking_report(fly(with_flow=True), circle, corridor=0.5, window=(5.0, 15.0))
-    assert rep["verdict"] == "RÉUSSI"
+    assert rep["verdict"] == "PASS"
 
 
 def test_report_counts_time_out_of_corridor():
     res = fly(with_flow=True)
     rep = tracking_report(res, circle, corridor=0.0, window=(5.0, 15.0))
-    assert rep["verdict"] == "ÉCHOUÉ"
-    assert np.isclose(rep["temps_hors_couloir_s"], 10.0, atol=0.01)
+    assert rep["verdict"] == "FAIL"
+    assert np.isclose(rep["time_out_of_corridor_s"], 10.0, atol=0.01)

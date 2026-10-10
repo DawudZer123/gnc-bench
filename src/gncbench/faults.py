@@ -1,4 +1,4 @@
-"""Injection de pannes capteurs, pour tester la robustesse de la navigation."""
+"""Sensor fault injection, to test the robustness of the navigation."""
 
 from dataclasses import dataclass
 
@@ -7,13 +7,13 @@ import numpy as np
 
 @dataclass
 class SensorFault:
-    """Une panne sur un capteur, active entre `start` et `end` (s).
+    """A fault on one sensor, active between `start` and `end` (s).
 
-    mode = "dropout" : le capteur ne renvoie plus rien (NaN), comme un GPS qui perd ses satellites.
-    mode = "freeze"  : le capteur renvoie toujours sa dernière valeur, comme un pilote figé.
+    mode = "dropout": the sensor returns nothing (NaN), like a GPS that loses its satellites.
+    mode = "freeze":  the sensor keeps returning its last value, like a frozen driver.
     """
 
-    sensor: str           # nom du capteur visé : "gps", "imu", "baro"
+    sensor: str           # name of the target sensor: "gps", "imu", "baro", "flow"
     start: float
     end: float
     mode: str = "dropout"
@@ -26,4 +26,4 @@ class SensorFault:
             return np.full_like(measurement, np.nan)
         if self.mode == "freeze":
             return last_good.copy() if last_good is not None else measurement
-        raise ValueError(f"Mode de panne inconnu : {self.mode}")
+        raise ValueError(f"Unknown fault mode: {self.mode}")

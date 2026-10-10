@@ -1,1 +1,1 @@
-"""Banc d'essai GNC-in-the-loop pour quadricoptère."""
+"""GNC-in-the-loop test bench for a quadcopter."""

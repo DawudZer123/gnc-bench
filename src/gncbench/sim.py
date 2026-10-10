@@ -1,4 +1,4 @@
-"""Boucle de simulation : physique à pas fixe, contrôleur à sa propre fréquence."""
+"""Simulation loop: fixed-step physics, controller at its own rate."""
 
 from dataclasses import dataclass, field
 
@@ -13,19 +13,19 @@ class SimResult:
     t: np.ndarray        # (N,)
     states: np.ndarray   # (N, 17)
     rotors: np.ndarray   # (N, 4)
-    measurements: dict = field(default_factory=dict)  # nom -> (temps (M,), mesures (M, k))
-    wind: np.ndarray = None                            # (N, 3), vitesse du vent
-    estimates: np.ndarray = None                       # (N, 6), position et vitesse estimées
-    estimate_std: np.ndarray = None                    # (N, 3), écart-type estimé de la position
+    measurements: dict = field(default_factory=dict)  # name -> (times (M,), measurements (M, k))
+    wind: np.ndarray = None                            # (N, 3), wind velocity
+    estimates: np.ndarray = None                       # (N, 6), estimated position and velocity
+    estimate_std: np.ndarray = None                    # (N, 3), estimated position standard deviation
 
 
 def simulate(x0, controller, reference, params, duration, dt=0.002, ctrl_every=2, sensors=(),
              wind=None, faults=(), estimator=None, use_estimate=False):
-    """Simule `duration` secondes. Le contrôleur tourne tous les `ctrl_every` pas (ici 250 Hz).
+    """Simulates `duration` seconds. The controller runs every `ctrl_every` steps (here 250 Hz).
 
-    estimator    : filtre de navigation qui reçoit les mesures des capteurs (optionnel).
-    use_estimate : si True, le contrôleur vole avec la position et la vitesse ESTIMÉES
-                   au lieu des vraies. C'est la situation d'un vrai drone.
+    estimator:    navigation filter that receives the sensor measurements (optional).
+    use_estimate: if True, the controller flies with the ESTIMATED position and velocity
+                  instead of the true ones. This is what a real drone does.
     """
     n = int(round(duration / dt))
     t = np.arange(n + 1) * dt
@@ -38,7 +38,7 @@ def simulate(x0, controller, reference, params, duration, dt=0.002, ctrl_every=2
     u = np.zeros(4)
     controller.reset()
     logs = {sensor.name: ([], []) for sensor in sensors}
-    last_good = {sensor.name: None for sensor in sensors}   # dernière mesure valide
+    last_good = {sensor.name: None for sensor in sensors}   # last valid measurement
 
     for k in range(n + 1):
         if k % ctrl_every == 0:
@@ -47,7 +47,7 @@ def simulate(x0, controller, reference, params, duration, dt=0.002, ctrl_every=2
             if estimator is not None and use_estimate:
                 x_ctrl[POS], x_ctrl[VEL] = estimator.position, estimator.velocity
             u = controller.update(t[k], x_ctrl, ref)
-        # Le vent pousse le drone via la traînée : F = c × (vitesse du vent).
+        # The wind pushes the drone through drag: F = c × (wind velocity).
         winds[k] = wind.step(dt) if wind is not None else 0.0
         f_wind = params.drag_coeff * winds[k]
         states[k], rotors[k] = x, u

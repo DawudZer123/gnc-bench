@@ -1,36 +1,36 @@
-# GNC Bench : banc d'essai GNC-in-the-loop (MEC McGill)
+# GNC Bench: a GNC-in-the-loop test bench (MEC McGill)
 
-Simulateur de quadricoptère en 6 degrés de liberté, dans lequel on branche un contrôleur pour le tester automatiquement. Ce dépôt contient le code de la **semaine 1** : dynamique, intégrateur RK4 et contrôleur de vol stationnaire, avec 7 tests qui passent.
+A 6-degree-of-freedom quadcopter simulator into which you plug a controller to test it automatically. It includes noisy sensors, wind, sensor faults and a Kalman navigation filter. The headline demo is a figure-8 flight in the wind with a 20 s GPS outage.
 
 ---
 
-## 1. Installer les logiciels (une seule fois)
+## 1. Install the software (once)
 
-Tout se fait dans **VS Code** avec **Python**. Pas besoin de MATLAB.
+Everything runs in **VS Code** with **Python**. No MATLAB needed.
 
-| Logiciel | Où le trouver | Remarque |
+| Software | Where to get it | Note |
 | --- | --- | --- |
-| VS Code | déjà installé | |
-| Python 3.12 | [python.org/downloads](https://www.python.org/downloads/) | Windows : cocher **« Add python.exe to PATH »** pendant l'installation |
-| Git | [git-scm.com](https://git-scm.com/downloads) | Mac : déjà présent, ou `xcode-select --install` |
-| Compte GitHub | [github.com](https://github.com) | pour sauvegarder le code et le montrer au jury |
+| VS Code | already installed | |
+| Python 3.12 | [python.org/downloads](https://www.python.org/downloads/) | Windows: tick **"Add python.exe to PATH"** during installation |
+| Git | [git-scm.com](https://git-scm.com/downloads) | Mac: already there, or `xcode-select --install` |
+| GitHub account | [github.com](https://github.com) | to back up the code and show it to the judges |
 
-Vérifie dans un terminal :
+Check in a terminal:
 
 ```bash
-python --version     # Mac/Linux : python3 --version
+python --version     # Mac/Linux: python3 --version
 git --version
 ```
 
-## 2. Ouvrir le projet dans VS Code
+## 2. Open the project in VS Code
 
-1. Dézippe `gnc-bench.zip` dans un dossier simple, par exemple `Documents/gnc-bench`.
-2. Dans VS Code : **File > Open Folder…** et choisis `gnc-bench`.
-3. VS Code propose d'installer les extensions recommandées (Python, Pylance, Ruff, Jupyter). Clique **Install All**.
+1. Clone or unzip the project into a simple folder, for example `Documents/gnc-bench`.
+2. In VS Code: **File > Open Folder…** and pick `gnc-bench`.
+3. VS Code offers to install the recommended extensions (Python, Pylance, Ruff, Jupyter). Click **Install All**.
 
-## 3. Créer l'environnement Python
+## 3. Create the Python environment
 
-Un environnement virtuel (`.venv`) isole les librairies de ce projet. Ouvre le terminal intégré (**Terminal > New Terminal**), puis :
+A virtual environment (`.venv`) isolates this project's libraries. Open the integrated terminal (**Terminal > New Terminal**), then:
 
 **Mac / Linux**
 
@@ -48,78 +48,74 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-Si PowerShell refuse d'activer : `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, puis recommence.
+If PowerShell refuses to activate: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then try again.
 
-Ensuite, dans VS Code : `Ctrl+Shift+P` (Mac : `Cmd+Shift+P`) > **Python: Select Interpreter** > choisis celui qui contient `.venv`. Le préfixe `(.venv)` doit apparaître dans le terminal.
+Then, in VS Code: `Ctrl+Shift+P` (Mac: `Cmd+Shift+P`) > **Python: Select Interpreter** > pick the one inside `.venv`. The `(.venv)` prefix should appear in the terminal.
 
-## 4. Vérifier que tout marche
-
-```bash
-pytest
-```
-
-Résultat attendu : `7 passed`. Tu peux aussi ouvrir l'onglet **Testing** (icône d'éprouvette) dans VS Code et cliquer sur ▶.
-
-Puis lance la démo, avec **F5** (configuration « Démo vol stationnaire ») ou :
+## 4. Check that everything works
 
 ```bash
-python scripts/hover_demo.py
+python -m pytest
 ```
 
-Le drone part incliné du sol et rejoint le point (1 ; -0,5 ; 2) m avec un lacet de 0,5 rad. Résultat attendu : erreur finale d'environ 0,6 cm, et un graphique dans `outputs/hover_demo.png`.
+Expected result: `25 passed`. You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
 
-## 5. Mettre le projet sur GitHub
+Then run the demos (press **F5** for the "Hover demo" configuration, or use the terminal):
 
-1. Sur github.com : **New repository**, nom `gnc-bench`, sans README.
-2. Dans le terminal du projet :
+| Script | What it shows |
+| --- | --- |
+| `scripts/hover_demo.py` | Take-off from a tilted attitude to (1, -0.5, 2) m; final error about 0.6 cm |
+| `scripts/sensors_demo.py` | IMU, GPS and barometer readings compared with the truth |
+| `scripts/wind_demo.py` | Holding position in a 5 m/s wind, with and without integral action |
+| `scripts/faults_demo.py` | 4 s GPS outage: dead reckoning drifts about 2.5 m |
+| `scripts/navigation_demo.py` | Kalman filter vs dead reckoning during the same outage |
+| `scripts/final_demo.py` | Figure-8 in the wind, GPS lost for 20 s: IMU + baro FAIL, + optical flow PASS |
 
-```bash
-git init
-git add .
-git commit -m "Semaine 1 : dynamique 6 DDL, RK4, contrôleur de vol stationnaire"
-git branch -M main
-git remote add origin https://github.com/<ton-nom>/gnc-bench.git
-git push -u origin main
-```
+Plots are saved in `outputs/`.
 
-Ensuite, fais un commit à chaque étape qui marche. VS Code le fait aussi en un clic dans l'onglet **Source Control**.
-
-## 6. Ce que contient le code
+## 5. What the code contains
 
 ```
 gnc-bench/
 ├── src/gncbench/
-│   ├── params.py        paramètres physiques (masse, inertie, bras, rotors) et matrice de mélange
-│   ├── math3d.py        quaternions, matrices de rotation, angles d'Euler
-│   ├── dynamics.py      équations du mouvement 6 DDL : dx/dt = f(x, u)
-│   ├── integrators.py   pas de Runge-Kutta 4
-│   ├── controllers.py   interface Controller + contrôleur de vol stationnaire
-│   └── sim.py           boucle de simulation (physique 500 Hz, contrôleur 250 Hz)
-├── scripts/hover_demo.py  démo + graphique
-├── tests/test_dynamics.py 7 tests de validation
-└── .vscode/             réglages VS Code (interpréteur, tests, F5)
+│   ├── params.py        physical parameters (mass, inertia, arms, rotors) and mixer matrix
+│   ├── math3d.py        quaternions, rotation matrices, Euler angles
+│   ├── dynamics.py      6-DOF equations of motion + motor lag: dx/dt = f(x, u)
+│   ├── integrators.py   Runge-Kutta 4 step
+│   ├── controllers.py   Controller interface + cascaded hover/tracking controller
+│   ├── sensors.py       IMU, GPS, barometer, optical flow
+│   ├── wind.py          mean wind + Gauss-Markov gusts
+│   ├── faults.py        sensor faults (dropout, freeze)
+│   ├── estimator.py     navigation Kalman filter (position, velocity, accel bias)
+│   ├── metrics.py       automatic tracking report (corridor, PASS/FAIL)
+│   └── sim.py           simulation loop (physics 500 Hz, controller 250 Hz)
+├── scripts/             demos + plots
+├── tests/               25 validation tests
+└── .vscode/             VS Code settings (interpreter, tests, F5)
 ```
 
-**Le modèle.** L'état a 13 composantes : position et vitesse dans le repère monde (z vers le haut), attitude en quaternion, vitesses angulaires dans le repère corps. Les équations :
+**The model.** The state has 17 components: position and velocity in the world frame (z up), attitude as a quaternion, angular rates in the body frame, and the actual thrust of each rotor. The equations:
 
 - ṗ = v
-- m v̇ = R(q) [0, 0, T] − m g e₃ − c v
+- m v̇ = R(q) [0, 0, T] − m g e₃ − c v + c w_wind
 - q̇ = ½ q ⊗ [0, ω]
 - J ω̇ = τ − ω × J ω
+- Ṫᵢ = (Tᵢ,cmd − Tᵢ) / τ_motor
 
-**Le contrôleur.** Une boucle externe PID calcule l'accélération voulue. On en déduit l'orientation voulue du drone, puis un contrôle géométrique d'attitude sur SO(3) (Lee, Leok et McClamroch, 2010) calcule les couples. Une matrice de mélange les convertit en poussée pour chacun des 4 rotors.
+**The controller.** An outer PID loop (with velocity and acceleration feedforward) computes the desired acceleration. From it we derive the desired orientation of the drone, then a geometric attitude controller on SO(3) (Lee, Leok and McClamroch, 2010) computes the torques. A mixer matrix converts them into a thrust for each of the 4 rotors.
 
-**Les tests** vérifient la physique, pas seulement que le code tourne : chute libre comparée à la solution analytique, équilibre exact à la poussée de vol stationnaire, conservation de l'énergie et du moment cinétique en rotation libre, et convergence du contrôleur.
+**Navigation.** A linear Kalman filter predicts with the IMU and corrects with the GPS, the barometer and optical flow. Failed sensors (NaN) are ignored. With `use_estimate=True`, the controller flies on the estimate instead of the truth, like a real drone.
 
-## 7. Ton travail pour la semaine 1
+**The tests** check the physics, not just that the code runs: free fall against the analytic solution, exact equilibrium at hover thrust, conservation of energy and angular momentum in free rotation, motor step response, sensor noise statistics, wind statistics and steady-state offset, fault injection, Kalman filter accuracy and uncertainty growth, and the corridor report.
 
-Le code tourne, mais l'objectif est que tu puisses l'expliquer au jury. Dans l'ordre :
+## 6. Commit your work
 
-- [ ] Lire `dynamics.py` et retrouver chaque équation ci-dessus dans le code.
-- [ ] Changer la masse à 1,5 kg dans `params.py`, relancer la démo, et expliquer ce qui change sur les poussées.
-- [ ] Mettre `ki=0` puis `ki=1.0` dans `HoverController` et comparer les courbes. Pourquoi l'intégrale ralentit-elle la convergence finale ?
-- [ ] **À coder toi-même** : ajouter une dynamique de moteur du premier ordre (la poussée réelle suit la commande avec une constante de temps d'environ 30 ms). Indice : ajouter 4 composantes à l'état.
-- [ ] Ajouter un test pour ta dynamique de moteur.
-- [ ] Faire un commit sur GitHub.
+Commit after every step that works:
 
-La semaine 2 ajoutera les capteurs bruités, le vent et les pannes.
+```bash
+git add .
+git commit -m "Short description of the change"
+git push
+```
+
+VS Code can do this in one click from the **Source Control** tab.

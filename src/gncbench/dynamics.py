@@ -1,11 +1,12 @@
-"""Dynamique 6 DDL d'un quadricoptère (corps rigide).
+"""6-DOF quadcopter dynamics (rigid body).
 
-Vecteur d'état (13) : x = [p (3), v (3), q (4), ω (3)]
-  p : position dans le repère monde (ENU, z vers le haut), m
-  v : vitesse dans le repère monde, m/s
-  q : attitude corps -> monde, quaternion [w, x, y, z]
-  ω : vitesse angulaire dans le repère corps, rad/s
-Entrée : poussée de chaque rotor (4), N.
+State vector (17): x = [p (3), v (3), q (4), ω (3), T (4)]
+  p: position in the world frame (ENU, z up), m
+  v: velocity in the world frame, m/s
+  q: body -> world attitude, quaternion [w, x, y, z]
+  ω: angular velocity in the body frame, rad/s
+  T: actual thrust of each rotor (first-order motor lag), N
+Input: commanded thrust of each rotor (4), N.
 """
 
 import numpy as np
@@ -24,13 +25,13 @@ def initial_state(position=(0, 0, 0), quat=(1, 0, 0, 0)):
 
 
 def state_derivative(x, rotor_thrusts, params, wind_force=np.zeros(3)):
-    """Équations du mouvement : renvoie dx/dt."""
+    """Equations of motion: returns dx/dt."""
     v = x[VEL]
     q = x[QUAT]
     w = x[OMEGA]
 
-    thrusts = x[MOTORS]                                          # poussée réelle (état)
-    cmd = np.clip(rotor_thrusts, 0.0, params.max_thrust)         # poussée demandée
+    thrusts = x[MOTORS]                                          # actual thrust (state)
+    cmd = np.clip(rotor_thrusts, 0.0, params.max_thrust)         # commanded thrust
     total, tx, ty, tz = params.mixer() @ thrusts
     torque = np.array([tx, ty, tz])
 

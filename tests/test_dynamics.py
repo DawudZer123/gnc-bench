@@ -1,12 +1,11 @@
 import numpy as np
 
 from gncbench.controllers import HoverController
-from gncbench.dynamics import OMEGA, POS, QUAT, VEL, initial_state, state_derivative
+from gncbench.dynamics import MOTORS, OMEGA, POS, QUAT, VEL, initial_state, state_derivative
 from gncbench.integrators import rk4_step
 from gncbench.math3d import quat_from_euler, quat_to_euler, quat_to_rotmat
 from gncbench.params import QuadParams
 from gncbench.sim import simulate
-from gncbench.dynamics import MOTORS
 
 P = QuadParams()
 
@@ -53,10 +52,10 @@ def test_torque_free_rotation_conserves_energy_and_momentum():
     def invariants(s):
         w = s[OMEGA]
         R = quat_to_rotmat(s[QUAT])
-        return 0.5 * w @ J @ w, R @ J @ w   # énergie, moment cinétique (monde)
+        return 0.5 * w @ J @ w, R @ J @ w   # energy, angular momentum (world)
 
     e0, h0 = invariants(x)
-    # Poussée nulle mais gravité active : elle n'agit pas sur la rotation.
+    # Zero thrust but gravity on: it does not affect the rotation.
     for _ in range(2000):
         x = rk4_step(lambda s: state_derivative(s, np.zeros(4), P), x, 0.001)
     e1, h1 = invariants(x)
@@ -73,11 +72,12 @@ def test_hover_controller_reaches_target():
     assert np.isclose(quat_to_euler(final[QUAT])[2], 0.5, atol=0.01)
     assert np.linalg.norm(final[VEL]) < 0.01
 
+
 def test_motor_step_response():
-    x = initial_state()               # moteurs à 0 N
-    cmd = np.full(4, 4.0)             # échelon de 4 N
+    x = initial_state()
+    cmd = np.full(4, 4.0)
     dt = 0.001
-    for _ in range(30):               # 30 pas × 1 ms = tau
+    for _ in range(30):
         x = rk4_step(lambda s: state_derivative(s, cmd, P), x, dt)
     expected = 4.0 * (1 - np.exp(-1))
     assert np.allclose(x[MOTORS], expected, atol=1e-3)

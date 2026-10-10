@@ -28,7 +28,7 @@ def test_filter_beats_raw_gps():
     res, _, _ = run(10.0)
     last = res.t > 5.0
     kf_error = np.linalg.norm(res.estimates[last, :3] - res.states[last, :3], axis=1).mean()
-    assert kf_error < 0.3          # le GPS seul se trompe d'environ 1,2 m en moyenne
+    assert kf_error < 0.3          # GPS alone is off by about 1.2 m on average
 
 
 def test_filter_estimates_vertical_accel_bias():
