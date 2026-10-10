@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Démo vol stationnaire",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/hover_demo.py",
+      "console": "integratedTerminal"
+    }
+  ]
+}
