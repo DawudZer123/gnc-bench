@@ -11,7 +11,7 @@ Input: commanded thrust of each rotor (4), N.
 
 import numpy as np
 
-from .math3d import quat_mult, quat_to_rotmat
+from .math3d import cross3, quat_mult, quat_to_rotmat
 
 POS, VEL, QUAT, OMEGA, MOTORS = slice(0, 3), slice(3, 6), slice(6, 10), slice(10, 13), slice(13, 17)
 STATE_SIZE = 17
@@ -45,6 +45,6 @@ def state_derivative(x, rotor_thrusts, params, wind_force=np.zeros(3)):
     dx[POS] = v
     dx[VEL] = (thrust_world + gravity + drag + wind_force) / params.mass
     dx[QUAT] = 0.5 * quat_mult(q, np.concatenate(([0.0], w)))
-    dx[OMEGA] = np.linalg.solve(J, torque - np.cross(w, J @ w))
+    dx[OMEGA] = np.linalg.solve(J, torque - cross3(w, J @ w))
     dx[MOTORS] = (cmd - thrusts) / params.motor_tau
     return dx

@@ -3,7 +3,7 @@
 import numpy as np
 
 from .dynamics import OMEGA, POS, QUAT, VEL
-from .math3d import quat_to_rotmat, vee
+from .math3d import cross3, quat_to_rotmat, vee
 
 
 class Controller:
@@ -58,15 +58,15 @@ class HoverController(Controller):
         z_d = a_des / np.linalg.norm(a_des)
         yaw = reference.get("yaw", 0.0)
         x_c = np.array([np.cos(yaw), np.sin(yaw), 0.0])
-        y_d = np.cross(z_d, x_c)
+        y_d = cross3(z_d, x_c)
         y_d /= np.linalg.norm(y_d)
-        R_d = np.column_stack([np.cross(y_d, z_d), y_d, z_d])
+        R_d = np.column_stack([cross3(y_d, z_d), y_d, z_d])
 
         # 3. Total thrust and torques (geometric control on SO(3)).
         thrust = m * a_des @ R[:, 2]
         e_R = 0.5 * vee(R_d.T @ R - R.T @ R_d)
         J = self.p.inertia
-        torque = -self.k_att * e_R - self.k_rate * w + np.cross(w, J @ w)
+        torque = -self.k_att * e_R - self.k_rate * w + cross3(w, J @ w)
 
         # 4. Allocation to the 4 rotors.
         rotors = self.mixer_inv @ np.concatenate(([thrust], torque))

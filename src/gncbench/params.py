@@ -28,7 +28,15 @@ class QuadParams:
         return np.array([1, 1, -1, -1])
 
     def mixer(self):
-        """Matrix M such that [total thrust, τx, τy, τz] = M @ rotor thrusts."""
+        """Matrix M such that [total thrust, τx, τy, τz] = M @ rotor thrusts.
+
+        Computed once, then cached: the simulation calls it thousands of times per second.
+        """
+        if getattr(self, "_mixer", None) is None:
+            self._mixer = self._build_mixer()
+        return self._mixer
+
+    def _build_mixer(self):
         r = self.rotor_positions()
         s = self.rotor_spins()
         return np.vstack([
