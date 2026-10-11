@@ -1,6 +1,8 @@
-# GNC Bench: a GNC-in-the-loop test bench (MEC McGill)
+# GNC Bench: a GNC-in-the-loop test bench for quadcopters
 
 A 6-degree-of-freedom quadcopter simulator into which you plug a controller to test it automatically. It includes noisy sensors, wind, sensor faults and a Kalman navigation filter. The headline demo is a figure-8 flight in the wind with a 20 s GPS outage.
+
+It can also fly the **real PX4 autopilot** on its physics (software-in-the-loop, section 7), so the code that flies real drones goes through the same Monte Carlo campaigns and fault injection.
 
 ---
 
@@ -58,7 +60,7 @@ Then, in VS Code: `Ctrl+Shift+P` (Mac: `Cmd+Shift+P`) > **Python: Select Interpr
 python -m pytest
 ```
 
-Expected result: `50 passed`. You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
+Expected result: `57 passed` (the 7 PX4 bridge tests need `pip install -e ".[px4]"`; without it they are skipped). You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
 
 Then run the demos (press **F5** for the "Hover demo" configuration, or use the terminal):
 
@@ -76,6 +78,8 @@ Then run the demos (press **F5** for the "Hover demo" configuration, or use the 
 | `scripts/ekf_campaign.py` | KF (true attitude) vs full EKF over 100 random flights |
 | `scripts/fault_detection_demo.py` | GPS frozen, jumping or drifting: EKF with and without fault detection |
 | `scripts/validate_flight_log.py` | Checks the models against a real PX4 log (`.ulg`); without a file, self-check on our simulator |
+| `scripts/px4_demo.py` | The real PX4 autopilot on our physics, GPS lost 20 s: GPS only vs + optical flow (section 7) |
+| `scripts/px4_campaign.py` | 100 random PX4 flights per version, in parallel PX4 instances (section 7) |
 | `scripts/flight3d_demo.py` | 3D view of a flight; `--animate` shows the drone flying, `--gif` saves it for the slides |
 
 Plots are saved in `outputs/`.
@@ -100,11 +104,16 @@ gnc-bench/
 │   ├── scenario.py      one flight's conditions; Scenario.random(seed); plug-in point for controllers
 │   ├── campaign.py      Monte Carlo campaigns in parallel + summary
 │   ├── flightlog.py     reads PX4 logs (NED/FRD -> ENU/FLU), sensor noise, EKF replay, drag fit
+│   ├── geo.py           latitude/longitude, World Magnetic Model, standard atmosphere
+│   ├── wmm_tables.py    magnetic field tables (copied from PX4, BSD-3)
+│   ├── px4bridge.py     PX4 SITL link: HIL sensors out, motor commands in (lockstep), offboard link
+│   ├── px4flight.py     one PX4 flight: start PX4, take off, fly the mission, record
+│   ├── px4campaign.py   Monte Carlo on PX4 in parallel instances
 │   ├── report.py        self-contained HTML campaign report
 │   ├── viz.py           3D flight view and drone animation
 │   └── sim.py           simulation loop (physics 500 Hz, controller 250 Hz)
 ├── scripts/             demos + plots
-├── tests/               50 validation tests
+├── tests/               57 validation tests
 └── .vscode/             VS Code settings (interpreter, tests, F5)
 ```
 
@@ -143,3 +152,56 @@ git push
 ```
 
 VS Code can do this in one click from the **Source Control** tab.
+
+## 7. Fly the real PX4 autopilot on our physics
+
+Up to here the controller and the estimator under test were our own Python code. Real drones fly with **PX4**. PX4 can be compiled for a computer (SITL, software-in-the-loop): it then reads its sensors from a simulator and sends its motor commands back. `px4bridge.py` makes our simulator that simulator.
+
+```
+our physics (Python)  --HIL_SENSOR: IMU, magnetometer, barometer (250 Hz)-->  PX4 SITL (real C++ flight code)
+                      --HIL_GPS (10 Hz), optical flow + rangefinder (50 Hz)-->
+                      <--HIL_ACTUATOR_CONTROLS: 4 motor commands------------
+our mission (Python)  --position setpoints over MAVLink (offboard, 20 Hz)-->
+```
+
+**Lockstep.** PX4 has no clock of its own in this mode: its time is the timestamp of our sensor messages, and it answers each one with the motor commands for that step. A flight is reproducible from its seed and runs as fast as the computer allows (about 3× real time per instance).
+
+**What we simulate for PX4.** The Iris airframe PX4 is tuned for (1.5 kg, `IrisParams`); a GPS whose error wanders slowly (Gauss-Markov, like a real receiver) instead of white noise; the magnetometer from the World Magnetic Model at the flight location (`geo.py`, McGill campus by default); the barometer from the standard atmosphere; a rigid ground for take-off and landing; optionally a downward optical flow camera and rangefinder, in the exact sign convention of PX4's EKF2.
+
+### Build PX4 (once, about 20 minutes)
+
+On a Mac, with the project's virtual environment active (it provides CMake and PX4's Python tools, no Homebrew needed):
+
+```bash
+cd ~/Documents/gnc-bench && source .venv/bin/activate
+pip install "cmake<4" ninja empy==3.3.4 pyros-genmsg kconfiglib jinja2 jsonschema pyyaml future packaging toml pyserial psutil
+git clone --recursive --branch v1.15.4 https://github.com/PX4/PX4-Autopilot.git ~/PX4-Autopilot
+cd ~/PX4-Autopilot
+make px4_sitl_default
+```
+
+PX4 v1.15 needs CMake 3 (CMake 4 refuses its older build files). The compiler is Apple's, from the Command Line Tools (`xcode-select --install`). The build ends with `Linking ... dyn_hello.px4mod`. If it complains about too many open files, run `ulimit -S -n 2048` first.
+
+Then, in the project's terminal (`.venv` active): `pip install -e ".[px4]"`. The scripts look for PX4 in `~/PX4-Autopilot`, or wherever `PX4_DIR` points.
+
+### Run
+
+```bash
+python scripts/px4_demo.py           # one flight per version, GPS lost 20 s
+python scripts/px4_campaign.py 100 4 # 100 random flights per version, 4 PX4 instances in parallel
+```
+
+If you stop a campaign with Ctrl+C, some PX4 instances may keep running in the background and block the next run: clean them with `pkill -x px4`.
+
+### What PX4 does (100 random flights per version)
+
+Figure-8 for 30 s, random wind (0–6 m/s) and gusts, the GPS lost for 4.5–15 s at a random moment. PASS = mission completed and never more than 1 m away from it.
+
+| | pass | mission completed | median worst error |
+| --- | --- | --- | --- |
+| A: PX4, GPS only | 3 % | 3 % | 4.3 m |
+| B: PX4 + optical flow | 98 % | 99 % | 0.72 m |
+
+- **GPS only, PX4 gives up after about 5 s.** Its EKF2 dead-reckons on the IMU for 5.1–6.2 s, then declares the position lost and switches to Altitude mode: it descends and lands where it is, 3 m on average from where it gave up. The only flights that passed had outages under 5 s. This is PX4's designed behaviour, and the bench measures it.
+- **With optical flow, PX4 flies through outages of 15 s.** One flight failed in strong wind (5.7 m/s, 15 s outage): it completed the mission but drifted 4.6 m.
+- **Known limit: not perfectly reproducible.** The physics and PX4 run in lockstep, but the mission's setpoints reach PX4 over UDP, outside the lockstep. Repeating a flight gives worst errors within a few centimetres of each other, and rarely a different outcome: one flight (seed 39) triggered a failsafe once in the campaign, then passed 9 times out of 9 when repeated.

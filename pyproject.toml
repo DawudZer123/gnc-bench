@@ -5,13 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gncbench"
 version = "0.1.0"
-description = "GNC-in-the-loop test bench for a quadcopter (MEC McGill)"
+description = "GNC-in-the-loop test bench for a quadcopter, with PX4 software-in-the-loop"
 requires-python = ">=3.10"
 dependencies = ["numpy", "scipy", "matplotlib"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
 logs = ["pyulog"]      # only to read real PX4 flight logs (step 4)
+px4 = ["pymavlink"]    # only to fly the real PX4 on our physics (option A)
 
 [tool.setuptools.packages.find]
 where = ["src"]
