@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from .px4bridge import IrisParams, OffboardLink, Px4Bridge, Px4Flight, Px4Process
+from .px4bridge import IrisParams, OffboardLink, Px4Bridge, Px4Flight, Px4Process, SensorNoise
 from .trajectories import figure_eight
 from .wind import Wind
 
@@ -53,9 +53,14 @@ def mission_reference(t, trajectory, duration):
 
 def fly_px4(duration=40.0, trajectory=figure_eight, seed=1, wind_speed=0.0, wind_heading=0.0,
             gust_std=0.0, faults=(), instance=0, params=None, px4_dir=None, log_dir=None,
-            arm_after=3.0, flow=False, verbose=False):
+            arm_after=3.0, flow=False, verbose=False, mission=None, px4_params=None,
+            noise=None, battery=None):
     """Fly the real PX4 on our physics. `faults` are timed from the start of the trajectory.
 
+    mission:    optional (function t_since_arming -> (pos, vel, acc) ENU, length in s); by
+                default: take off, hover, fly `trajectory` for `duration` s, descend.
+    px4_params: PX4 parameters to set before arming (e.g. a real drone's tuning, see twin.py).
+    noise, battery: sensor models and battery for the bridge (see twin.py).
     Returns a Px4Flight (truth, PX4 commands, PX4's own estimate, PX4 messages).
     """
     rng = np.random.default_rng(seed)
@@ -63,15 +68,18 @@ def fly_px4(duration=40.0, trajectory=figure_eight, seed=1, wind_speed=0.0, wind
     wind = Wind(rng, mean=wind_speed * np.array([np.cos(heading), np.sin(heading), 0.0]),
                 gust_std=gust_std) if (wind_speed or gust_std) else None
     bridge = Px4Bridge(params or IrisParams(), seed=seed, instance=instance, wind=wind, faults=faults,
-                       flow=flow)
+                       flow=flow, noise=noise or SensorNoise(), battery=battery)
+    if mission is None:
+        total = TAKEOFF_TIME + SETTLE_TIME + duration + LANDING_TIME
+        mission = (lambda tm: mission_reference(tm, trajectory, duration), total)
     bridge.listen()
     px4 = Px4Process(instance, px4_dir=px4_dir, log_dir=log_dir)
     link = None
     try:
         bridge.accept(timeout=60.0)
         link = OffboardLink(instance)
-        extra = FLOW_PARAMS if flow else {}
-        return _run_mission(bridge, link, duration, trajectory, arm_after, verbose, extra)
+        extra = {**(px4_params or {}), **(FLOW_PARAMS if flow else {})}
+        return _run_mission(bridge, link, mission, arm_after, verbose, extra)
     finally:
         px4.stop()
         bridge.close()
@@ -79,8 +87,8 @@ def fly_px4(duration=40.0, trajectory=figure_eight, seed=1, wind_speed=0.0, wind
             link.close()
 
 
-def _run_mission(bridge, link, duration, trajectory, arm_after, verbose, extra_params):
-    total = TAKEOFF_TIME + SETTLE_TIME + duration + LANDING_TIME
+def _run_mission(bridge, link, mission, arm_after, verbose, extra_params):
+    reference, total = mission
     log_t, log_x, log_u, log_w, log_ref = [], [], [], [], []
     params_sent = False
     armed_at = np.nan
@@ -90,7 +98,7 @@ def _run_mission(bridge, link, duration, trajectory, arm_after, verbose, extra_p
         t = bridge.t
         link.poll(t)
         if link.connected and not params_sent:
-            for name, value in {**PX4_PARAMS, **extra_params}.items():
+            for name, value in {**extra_params, **PX4_PARAMS}.items():
                 link.set_param(name, value)
             params_sent = True
         if np.isnan(armed_at):
@@ -106,7 +114,7 @@ def _run_mission(bridge, link, duration, trajectory, arm_after, verbose, extra_p
             if t > arm_after + 60.0:
                 raise RuntimeError("PX4 refused to arm: " + "; ".join(m for _, m in link.messages[-5:]))
         tm = t - armed_at if not np.isnan(armed_at) else 0.0
-        pos, vel, acc = mission_reference(tm, trajectory, duration)
+        pos, vel, acc = reference(tm)
         if t >= next_setpoint and link.connected:       # setpoints at 20 Hz (offboard needs > 2 Hz)
             link.setpoint(t, pos, vel, acc)
             next_setpoint = t + 0.05

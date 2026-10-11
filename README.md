@@ -60,7 +60,7 @@ Then, in VS Code: `Ctrl+Shift+P` (Mac: `Cmd+Shift+P`) > **Python: Select Interpr
 python -m pytest
 ```
 
-Expected result: `57 passed` (the 7 PX4 bridge tests need `pip install -e ".[px4]"`; without it they are skipped). You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
+Expected result: `63 passed` (the 7 PX4 bridge tests need `pip install -e ".[px4]"`; without it they are skipped). You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
 
 Then run the demos (press **F5** for the "Hover demo" configuration, or use the terminal):
 
@@ -109,11 +109,12 @@ gnc-bench/
 │   ├── px4bridge.py     PX4 SITL link: HIL sensors out, motor commands in (lockstep), offboard link
 │   ├── px4flight.py     one PX4 flight: start PX4, take off, fly the mission, record
 │   ├── px4campaign.py   Monte Carlo on PX4 in parallel instances
+│   ├── twin.py          digital twin: identify thrust, battery, balance, drag, sensors from a .ulg log
 │   ├── report.py        self-contained HTML campaign report
 │   ├── viz.py           3D flight view and drone animation
 │   └── sim.py           simulation loop (physics 500 Hz, controller 250 Hz)
 ├── scripts/             demos + plots
-├── tests/               57 validation tests
+├── tests/               63 validation tests
 └── .vscode/             VS Code settings (interpreter, tests, F5)
 ```
 
@@ -205,3 +206,48 @@ Figure-8 for 30 s, random wind (0–6 m/s) and gusts, the GPS lost for 4.5–15 
 - **GPS only, PX4 gives up after about 5 s.** Its EKF2 dead-reckons on the IMU for 5.1–6.2 s, then declares the position lost and switches to Altitude mode: it descends and lands where it is, 3 m on average from where it gave up. The only flights that passed had outages under 5 s. This is PX4's designed behaviour, and the bench measures it.
 - **With optical flow, PX4 flies through outages of 15 s.** One flight failed in strong wind (5.7 m/s, 15 s outage): it completed the mission but drifted 4.6 m.
 - **Known limit: not perfectly reproducible.** The physics and PX4 run in lockstep, but the mission's setpoints reach PX4 over UDP, outside the lockstep. Repeating a flight gives worst errors within a few centimetres of each other, and rarely a different outcome: one flight (seed 39) triggered a failsafe once in the campaign, then passed 9 times out of 9 when repeated.
+
+## 8. Digital twin of your own drone
+
+A flight log contains much more than the trajectory: the motor commands, the battery voltage and current, the raw sensors and PX4's whole configuration. `twin.py` turns one log into a model of **that** drone, then real PX4 flies it with **your** tuning (the 105 control, filter and geometry parameters are copied from the log).
+
+```bash
+pip install -e ".[px4,logs]"
+python scripts/build_twin.py my_flight.ulg --mass 1.8 --arm 0.24   # writes outputs/twin.json, twin.png
+python scripts/twin_replay.py my_flight.ulg                        # writes outputs/twin_replay.png
+```
+
+`build_twin.py` prints what it found and what it could not find. `twin_replay.py` flies the mission recorded in the log twice on PX4 SITL, at the same time: once on the twin, once on the generic Iris, and compares both with the real flight.
+
+**What one flight identifies.**
+
+- Thrust per unit throttle and how it fades with battery voltage (thrust ∝ V^α).
+- A battery model: open-circuit voltage, capacity slope, internal resistance, current versus throttle.
+- The centre of gravity, from which motors work harder in hover.
+- The yaw torque imbalance between clockwise and counter-clockwise propellers.
+- Horizontal drag.
+- Accelerometer and gyro vibration in flight, which is 50 to 100 times the noise at rest.
+- Barometer drift.
+
+The thrust gain only gives ratios. `--mass` and `--arm` set the scale, so give the real values if you know them.
+
+**What it does not identify: inertia and motor lag.** A calm mission barely rotates the drone (rates of a few hundredths of rad/s), and the attitude controller is in the loop, so a fit of angular acceleration against commanded torque is meaningless. `fit_rotation` checks the excitation and refuses below 0.3 rad/s of rate variation; the twin then uses priors. To identify them, fly a log with excitation: PX4's autotune, or sharp roll/pitch/yaw stick doublets.
+
+**Results on a real S500 log (Pixhawk 6C, 224 s flight).**
+
+- Hover throttle is 0.72, so thrust/weight at full throttle is 1.39.
+- Thrust ∝ V^1.19: after 1272 mAh, the same throttle lifts 9 % less.
+- Motor commands are [0.74 0.66 0.80 0.68]: the CG is 12 mm forward and 2 mm left, and the CCW props make 5.6 % more yaw torque.
+- Drag k = 0.14 1/s.
+- Vibration is about 1 m/s² on the accelerometer and 0.02–0.05 rad/s on the gyro.
+- The barometer drifts 3.7 m over the flight.
+
+| Replay of the real mission on PX4 | throttle error (RMS) | motor balance error (RMS) |
+| --- | --- | --- |
+| Generic Iris | 0.199 | 0.198 |
+| Twin | 0.013 | 0.004 |
+
+The twin reproduces the throttle rising from 0.70 to 0.75 as the battery drains, and the uneven motors.
+
+**Honest limit.** This comparison is in-sample: the twin was identified from the same flight it replays. The real test is a second log of the same drone, which the twin has never seen.
+

@@ -74,6 +74,7 @@ class SensorNoise:
     gps_white: float = 0.05  # m, fast receiver noise on top
     flow: float = 0.02       # rad/s, optical flow angular rate
     range: float = 0.02      # m, downward rangefinder
+    baro_walk: float = 0.0   # m/√s, slow barometer drift (random walk; temperature, airflow)
     gps_vel: float = 0.05    # m/s
 
 
@@ -120,7 +121,7 @@ class Px4Bridge:
     """
 
     def __init__(self, params=None, home=Home(), seed=0, instance=0, wind=None, faults=(),
-                 noise=SensorNoise(), yaw0=0.0, flow=False):
+                 noise=SensorNoise(), yaw0=0.0, flow=False, battery=None):
         from pymavlink.dialects.v20 import common as mavlink   # pip install pymavlink
 
         self.mavlink = mavlink
@@ -132,6 +133,8 @@ class Px4Bridge:
         self.faults = list(faults)
         self.noise = noise
         self.flow = flow           # also send a downward optical flow camera + rangefinder
+        self.battery = battery     # optional Battery: thrust fades as the voltage drops
+        self.baro_bias = 0.0
         self.x = initial_state(quat=(np.cos(yaw0 / 2), 0, 0, np.sin(yaw0 / 2)))
         self.u = np.zeros(4)
         self.t = 0.0
@@ -186,6 +189,8 @@ class Px4Bridge:
     def _integrate(self):
         p = self.params
         cmd = p.max_thrust * np.clip(self.u, 0.0, 1.0)      # linear thrust curve, as PX4 assumes
+        if self.battery is not None:
+            cmd = cmd * self.battery.step(float(np.mean(np.clip(self.u, 0, 1))), self.dt)
         h = self.dt / self.substeps
         for _ in range(self.substeps):
             w = self.wind.step(h) if self.wind is not None else np.zeros(3)
@@ -212,7 +217,9 @@ class Px4Bridge:
         accel = FRD_TO_FLU @ (self._specific_force_flu() + self.accel_bias + rng.normal(0, n.accel, 3))
         gyro = FRD_TO_FLU @ (self.x[OMEGA] + self.gyro_bias + rng.normal(0, n.gyro, 3))
         mag = FRD_TO_FLU @ (R.T @ self.field_enu + rng.normal(0, n.mag, 3))
-        altitude = self.home.alt + self.x[POS][2] + rng.normal(0, n.baro)
+        if n.baro_walk and k % 5 == 0:
+            self.baro_bias += rng.normal(0, n.baro_walk * np.sqrt(5 * self.dt))
+        altitude = self.home.alt + self.x[POS][2] + self.baro_bias + rng.normal(0, n.baro)
         pressure, temperature = pressure_at(altitude)
         fields = ACCEL | GYRO
         if k % 2 == 0:
