@@ -11,9 +11,21 @@ Sensors: IMU (prediction), GPS, barometer, optical flow, magnetometer (heading).
 Roll and pitch become observable through gravity: a tilt error makes the filter
 "see" a horizontal acceleration that GPS or optical flow then contradict.
 Yaw needs the magnetometer (or strong horizontal accelerations).
+
+Fault detection (step 3), two layers checked before any measurement is used:
+  - stale data: a measurement exactly equal to the previous one is rejected. Real sensors
+    are noisy, so an exact repeat means a frozen driver;
+  - χ² innovation test: the filter knows how far a measurement SHOULD be from its
+    prediction (covariance S). The normalized distance yᵀ S⁻¹ y follows a χ² law; above
+    its 99.9 % quantile, the measurement is too unlikely to be true and is rejected.
+If the GPS keeps failing the test while the filter has no other horizontal aid (no recent
+optical flow), the filter itself is probably the one that drifted: after `reset_after`
+seconds it trusts the GPS again (like PX4's GPS reset). With optical flow it never does,
+so a spoofed GPS stays rejected.
 """
 
 import numpy as np
+from scipy.stats import chi2
 
 from .math3d import hat, quat_mult, quat_to_euler, quat_to_rotmat
 
@@ -41,7 +53,8 @@ class NavigationEKF:
     def __init__(self, params, p0, v0=(0.0, 0.0, 0.0), q0=(1.0, 0.0, 0.0, 0.0),
                  accel_noise=0.05, gyro_noise=0.005, accel_bias_walk=1e-3, gyro_bias_walk=1e-4,
                  gps_noise=(0.5, 0.5, 1.0, 0.1, 0.1, 0.1), baro_noise=0.1, flow_noise=0.05,
-                 mag_noise=0.02, disturbance_tau=0.05):
+                 mag_noise=0.02, disturbance_tau=0.05, fault_detection=True, gate=0.999,
+                 reset_after=3.0):
         self.g = np.array([0.0, 0.0, params.gravity])
         self.p = np.array(p0, dtype=float)
         self.v = np.array(v0, dtype=float)
@@ -60,6 +73,16 @@ class NavigationEKF:
         self.omega = np.zeros(3)                 # last bias-corrected gyro reading
         self.disturbance_tau = disturbance_tau
         self.disturbance = np.zeros(3)
+        # Fault detection.
+        self.fault_detection = fault_detection
+        self.gate = gate
+        self.reset_after = reset_after          # s
+        self.time = 0.0                         # s, advanced by the IMU
+        self.health = {}                        # sensor -> {"accepted": n, "rejected": n, ...}
+        self.events = []                        # (time, sensor, "rejected" | "stale" | "reset")
+        self._last_raw = {}
+        self._rejected_since = {}
+        self._last_flow_time = -np.inf
 
     # ----- Prediction ----------------------------------------------------------------
     def predict(self, imu, dt):
@@ -97,9 +120,39 @@ class NavigationEKF:
         self.disturbance += dt / (self.disturbance_tau + dt) * (d - self.disturbance)
 
     # ----- Correction ----------------------------------------------------------------
-    def _correct(self, y, H, R_meas):
+    def _record(self, name, status):
+        counts = self.health.setdefault(name, {"accepted": 0, "rejected": 0, "stale": 0, "reset": 0})
+        counts[status] += 1
+        if status != "accepted":
+            self.events.append((self.time, name, status))
+
+    def _passes_gate(self, name, y, S):
+        """χ² test on the innovation. Returns False if the measurement must be dropped."""
+        nis = y @ np.linalg.solve(S, y)           # normalized innovation squared
+        if nis <= chi2.ppf(self.gate, len(y)):
+            self._rejected_since.pop(name, None)
+            return True
+        since = self._rejected_since.setdefault(name, self.time)
+        flow_recent = self.time - self._last_flow_time < 1.0
+        if name == "gps" and not flow_recent and self.time - since > self.reset_after:
+            # No other aid and the GPS has disagreed for a while: our own estimate drifted.
+            # Inflate our position/velocity uncertainty so the GPS can pull us back.
+            self.P[EP, EP] += np.diag(y[:3] ** 2)
+            self.P[EV, EV] += np.diag(y[3:] ** 2)
+            self._rejected_since.pop(name)
+            self._record(name, "reset")
+            return True
+        self._record(name, "rejected")
+        return False
+
+    def _correct(self, y, H, R_meas, name=None):
         """y = innovation (measurement - prediction), H = d(measurement) / d(error state)."""
         S = H @ self.P @ H.T + R_meas
+        if self.fault_detection and name is not None:
+            if not self._passes_gate(name, y, S):
+                return False
+            S = H @ self.P @ H.T + R_meas         # P may have been inflated by a reset
+            self._record(name, "accepted")
         K = self.P @ H.T @ np.linalg.inv(S)
         dx = K @ y
         I_KH = np.eye(N) - K @ H
@@ -111,17 +164,18 @@ class NavigationEKF:
         self.q /= np.linalg.norm(self.q)
         self.ba += dx[EBA]
         self.bg += dx[EBG]
+        return True
 
     def update_gps(self, z):
         H = np.zeros((6, N))
         H[0:3, EP] = I3
         H[3:6, EV] = I3
-        self._correct(z - np.concatenate([self.p, self.v]), H, self.R_gps)
+        self._correct(z - np.concatenate([self.p, self.v]), H, self.R_gps, "gps")
 
     def update_baro(self, z):
         H = np.zeros((1, N))
         H[0, 2] = 1.0
-        self._correct(z - self.p[2:3], H, self.R_baro)
+        self._correct(z - self.p[2:3], H, self.R_baro, "baro")
 
     def flow_prediction(self):
         """What the optical flow should read: the first 2 components of R^T v."""
@@ -135,12 +189,13 @@ class NavigationEKF:
         return H
 
     def update_flow(self, z):
-        self._correct(z - self.flow_prediction(), self.flow_jacobian(), self.R_flow)
+        if self._correct(z - self.flow_prediction(), self.flow_jacobian(), self.R_flow, "flow"):
+            self._last_flow_time = self.time
 
     def update_mag(self, z):
         H = np.zeros((1, N))
         H[0, ET] = quat_to_rotmat(self.q)[2, :]  # a body-frame rotation, seen around world z
-        self._correct(np.array([wrap(z[0] - self.yaw)]), H, self.R_mag)
+        self._correct(np.array([wrap(z[0] - self.yaw)]), H, self.R_mag, "mag")
 
     # ----- Interface with the simulation ---------------------------------------------
     def process(self, name, z, quat, dt):
@@ -149,7 +204,15 @@ class NavigationEKF:
             return
         if name == "imu":
             self.predict(z, dt)
-        elif name == "gps":
+            self.time += dt
+            return
+        if self.fault_detection:
+            last = self._last_raw.get(name)
+            self._last_raw[name] = z.copy()
+            if last is not None and np.array_equal(z, last):
+                self._record(name, "stale")
+                return
+        if name == "gps":
             self.update_gps(z)
         elif name == "baro":
             self.update_baro(z)

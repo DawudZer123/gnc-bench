@@ -65,7 +65,7 @@ def simulate(x0, controller, reference, params, duration, dt=0.002, ctrl_every=2
                 z = sensor.measure(t[k], x, state_derivative(x, u, params, f_wind), params)
                 active = [f for f in faults if f.sensor == sensor.name and f.is_active(t[k])]
                 if active:
-                    z = active[0].apply(z, last_good[sensor.name])
+                    z = active[0].apply(z, last_good[sensor.name], t[k])
                 else:
                     last_good[sensor.name] = z
                 times, values = logs[sensor.name]

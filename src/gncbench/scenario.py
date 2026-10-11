@@ -22,8 +22,16 @@ from .wind import Wind
 
 SENSOR_TYPES = {"imu": IMU, "gps": GPS, "baro": Barometer, "flow": OpticalFlow,
                 "mag": Magnetometer}
+
+
+def naive_ekf(params, p0):
+    """The full EKF with fault detection switched off: it believes every measurement."""
+    return NavigationEKF(params, p0, fault_detection=False)
+
+
 NAVIGATION = {"kf": NavigationFilter,   # attitude borrowed from the simulation (weeks 3-4)
-              "ekf": NavigationEKF}     # attitude estimated too, like a real autopilot
+              "ekf": NavigationEKF,     # attitude estimated too + fault detection
+              "ekf_naive": naive_ekf}   # same EKF, no fault detection
 
 
 def default_controller(params, dt):
@@ -46,6 +54,8 @@ class Scenario:
     outage_start: float = 10.0   # s, GPS lost at this time...
     outage_length: float = 20.0  # s, ...for this long
     mass_error: float = 0.0      # true mass = nominal mass × (1 + mass_error)
+    gps_fault: str = "dropout"   # what happens to the GPS during the outage (see SensorFault)
+    gps_fault_value: tuple = ()  # for "offset" (m) and "drift" (m/s)
 
     @classmethod
     def random(cls, seed, duration=30.0):
@@ -77,14 +87,14 @@ class Scenario:
         controller: any function (params, dt) -> Controller. A Controller class works too.
                     This is the plug-in point of the bench.
         sensors:    names of the sensors on board (see SENSOR_TYPES).
-        navigation: "kf" or "ekf" (see NAVIGATION). The EKF needs a compass for the yaw,
+        navigation: "kf", "ekf" or "ekf_naive" (see NAVIGATION). The EKF needs a compass for the yaw,
                     so "mag" is added to the sensors if it is missing.
         The report only judges the GPS outage window.
         """
         nominal = QuadParams()                                   # what the controller believes
         true = QuadParams(mass=nominal.mass * (1 + self.mass_error))  # what actually flies
         rng = np.random.default_rng(self.seed)
-        if navigation == "ekf" and "mag" not in sensors:
+        if navigation.startswith("ekf") and "mag" not in sensors:
             sensors = (*sensors, "mag")
         x0 = initial_state(position=trajectory(0)["position"])
         x0[MOTORS] = true.mass * true.gravity / 4
@@ -93,7 +103,8 @@ class Scenario:
         res = simulate(
             x0, controller(nominal, 0.004), trajectory, true, duration=self.duration,
             sensors=[SENSOR_TYPES[name](rng) for name in sensors],
-            faults=[SensorFault("gps", start=self.outage[0], end=self.outage[1])],
+            faults=[SensorFault("gps", start=self.outage[0], end=self.outage[1],
+                                mode=self.gps_fault, value=self.gps_fault_value)],
             estimator=NAVIGATION[navigation](nominal, p0=x0[POS]), use_estimate=True,
             wind=Wind(np.random.default_rng(self.seed + 10), mean=mean_wind, gust_std=self.gust_std),
         )
