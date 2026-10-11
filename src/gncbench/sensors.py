@@ -3,7 +3,7 @@
 import numpy as np
 
 from .dynamics import OMEGA, POS, QUAT, VEL
-from .math3d import quat_to_rotmat
+from .math3d import quat_to_euler, quat_to_rotmat
 
 
 class Sensor:
@@ -91,3 +91,20 @@ class OpticalFlow(Sensor):
         R = quat_to_rotmat(x[QUAT])
         v_body = R.T @ x[VEL]
         return v_body[:2] + self.rng.normal(0.0, self.vel_noise, 2)
+
+
+class Magnetometer(Sensor):
+    """Compass: measures the heading (yaw) from the Earth's magnetic field. Measurement: [yaw].
+
+    A real magnetometer gives a 3D field vector; we simulate the heading computed from it.
+    """
+
+    name = "mag"
+
+    def __init__(self, rng, rate=50.0, yaw_noise=0.02):
+        super().__init__(rng, rate)
+        self.yaw_noise = yaw_noise  # rad (about 1°)
+
+    def measure(self, t, x, dx, params):
+        yaw = quat_to_euler(x[QUAT])[2] + self.rng.normal(0.0, self.yaw_noise)
+        return np.array([(yaw + np.pi) % (2 * np.pi) - np.pi])

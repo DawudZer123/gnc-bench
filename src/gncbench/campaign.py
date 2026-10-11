@@ -12,13 +12,14 @@ import numpy as np
 from .scenario import Scenario, default_controller
 
 
-def _fly_one(scenario, controller, sensors, corridor):
-    _, report = scenario.fly(controller, sensors, corridor)
+def _fly_one(scenario, controller, sensors, corridor, navigation):
+    _, report = scenario.fly(controller, sensors, corridor, navigation=navigation)
     return {**asdict(scenario), **{k: v for k, v in report.items() if k != "error"}}
 
 
 def run_campaign(n, controller=default_controller, sensors=("imu", "gps", "baro", "flow"),
-                 first_seed=0, duration=30.0, corridor=0.5, workers=None, verbose=True):
+                 first_seed=0, duration=30.0, corridor=0.5, workers=None, verbose=True,
+                 navigation="kf"):
     """Flies n random scenarios and returns one row (dict) per flight, in seed order.
 
     workers: number of flights run in parallel (None = one per CPU core).
@@ -27,7 +28,7 @@ def run_campaign(n, controller=default_controller, sensors=("imu", "gps", "baro"
     scenarios = [Scenario.random(first_seed + i, duration) for i in range(n)]
     rows = [None] * n
     with ProcessPoolExecutor(workers) as pool:
-        futures = {pool.submit(_fly_one, s, controller, sensors, corridor): i
+        futures = {pool.submit(_fly_one, s, controller, sensors, corridor, navigation): i
                    for i, s in enumerate(scenarios)}
         for done, future in enumerate(as_completed(futures), start=1):
             rows[futures[future]] = future.result()

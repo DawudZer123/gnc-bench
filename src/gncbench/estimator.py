@@ -8,6 +8,11 @@ Estimated state (9): s = [p (3), v (3), b (3)]
 Optional sensor: optical flow (horizontal velocity in the body frame), which keeps
 the velocity accurate, so the position drifts slowly, without GPS.
 
+Bonus output: `disturbance`, the external acceleration (wind + drag) felt by the drone.
+Thrust always points along the body z axis, so whatever the accelerometer reads on the
+body x and y axes can only come from aerodynamic forces: that is the wind, measured directly
+(horizontal part only).
+
 Assumption: the attitude is known (provided by a separate attitude filter).
 With this assumption the model is linear: it is a standard Kalman filter.
 
@@ -26,7 +31,8 @@ I3 = np.eye(3)
 
 class NavigationFilter:
     def __init__(self, params, p0, v0=(0.0, 0.0, 0.0), accel_noise=0.05,
-                 bias_walk=1e-3, gps_noise=(0.5, 0.5, 1.0, 0.1, 0.1, 0.1), baro_noise=0.1, flow_noise=0.05):
+                 bias_walk=1e-3, gps_noise=(0.5, 0.5, 1.0, 0.1, 0.1, 0.1), baro_noise=0.1, flow_noise=0.05,
+                 disturbance_tau=0.05):
         self.g = np.array([0.0, 0.0, params.gravity])
         self.s = np.concatenate([p0, v0, np.zeros(3)])
         # Initial uncertainty: 1 m in position, 0.5 m/s in velocity, 0.1 m/s² in bias.
@@ -36,6 +42,8 @@ class NavigationFilter:
         self.R_gps = np.diag(np.square(gps_noise))
         self.R_baro = np.array([[baro_noise**2]])
         self.R_flow = np.eye(2) * flow_noise**2
+        self.disturbance_tau = disturbance_tau   # s, low-pass filter on the disturbance
+        self.disturbance = np.zeros(3)           # m/s², world frame
 
     # ----- Prediction ----------------------------------------------------------------
     def predict(self, accel_meas, quat, dt):
@@ -58,6 +66,16 @@ class NavigationFilter:
         Q[V_, V_] = I3 * (self.accel_noise * dt) ** 2
         Q[B_, B_] = I3 * (self.bias_walk**2) * dt
         self.P = F @ self.P @ F.T + Q
+
+        # Disturbance: body x/y accelerometer reading (bias removed), back in the world frame,
+        # smoothed by a first-order low-pass filter to remove the sensor noise.
+        # Only the horizontal part is kept: when the drone tilts into the wind, the rotation
+        # would otherwise leak a fake vertical component (vertical gusts are not compensated).
+        f_body = accel_meas - b
+        d = R @ np.array([f_body[0], f_body[1], 0.0])
+        d[2] = 0.0
+        alpha = dt / (self.disturbance_tau + dt)
+        self.disturbance = self.disturbance + alpha * (d - self.disturbance)
 
     # ----- Correction ----------------------------------------------------------------
     def _correct(self, z, H, R_meas):

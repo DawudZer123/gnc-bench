@@ -58,7 +58,7 @@ Then, in VS Code: `Ctrl+Shift+P` (Mac: `Cmd+Shift+P`) > **Python: Select Interpr
 python -m pytest
 ```
 
-Expected result: `34 passed`. You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
+Expected result: `41 passed`. You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
 
 Then run the demos (press **F5** for the "Hover demo" configuration, or use the terminal):
 
@@ -71,6 +71,9 @@ Then run the demos (press **F5** for the "Hover demo" configuration, or use the 
 | `scripts/navigation_demo.py` | Kalman filter vs dead reckoning during the same outage |
 | `scripts/final_demo.py` | Figure-8 in the wind, GPS lost for 20 s: IMU + baro FAIL, + optical flow PASS |
 | `scripts/campaign_demo.py` | Monte Carlo campaign: 100 random flights per version, writes `outputs/campaign_report.html` |
+| `scripts/controller_comparison.py` | Plug-in demo: baseline PID vs wind-rejection controller on the same 100 flights |
+| `scripts/ekf_demo.py` | Full EKF: the drone flies on its estimated attitude (error < 0.5°) |
+| `scripts/ekf_campaign.py` | KF (true attitude) vs full EKF over 100 random flights |
 | `scripts/flight3d_demo.py` | 3D view of a flight; `--animate` shows the drone flying, `--gif` saves it for the slides |
 
 Plots are saved in `outputs/`.
@@ -84,11 +87,12 @@ gnc-bench/
 │   ├── math3d.py        quaternions, rotation matrices, Euler angles
 │   ├── dynamics.py      6-DOF equations of motion + motor lag: dx/dt = f(x, u)
 │   ├── integrators.py   Runge-Kutta 4 step
-│   ├── controllers.py   Controller interface + cascaded hover/tracking controller
-│   ├── sensors.py       IMU, GPS, barometer, optical flow
+│   ├── controllers.py   Controller interface, cascaded PID controller, wind-rejection controller
+│   ├── sensors.py       IMU, GPS, barometer, optical flow, magnetometer
 │   ├── wind.py          mean wind + Gauss-Markov gusts
 │   ├── faults.py        sensor faults (dropout, freeze)
-│   ├── estimator.py     navigation Kalman filter (position, velocity, accel bias)
+│   ├── estimator.py     navigation Kalman filter, attitude known (position, velocity, accel bias)
+│   ├── ekf.py           full error-state EKF: also attitude and gyro bias, no shortcut
 │   ├── metrics.py       tracking report (corridor, PASS/FAIL, control effort, saturation)
 │   ├── trajectories.py  reference trajectories (figure-8)
 │   ├── scenario.py      one flight's conditions; Scenario.random(seed); plug-in point for controllers
@@ -97,7 +101,7 @@ gnc-bench/
 │   ├── viz.py           3D flight view and drone animation
 │   └── sim.py           simulation loop (physics 500 Hz, controller 250 Hz)
 ├── scripts/             demos + plots
-├── tests/               34 validation tests
+├── tests/               41 validation tests
 └── .vscode/             VS Code settings (interpreter, tests, F5)
 ```
 
@@ -112,6 +116,10 @@ gnc-bench/
 **The controller.** An outer PID loop (with velocity and acceleration feedforward) computes the desired acceleration. From it we derive the desired orientation of the drone, then a geometric attitude controller on SO(3) (Lee, Leok and McClamroch, 2010) computes the torques. A mixer matrix converts them into a thrust for each of the 4 rotors.
 
 **Navigation.** A linear Kalman filter predicts with the IMU and corrects with the GPS, the barometer and optical flow. Failed sensors (NaN) are ignored. With `use_estimate=True`, the controller flies on the estimate instead of the truth, like a real drone.
+
+**Full EKF.** `NavigationEKF` is an error-state EKF with 15 error states (position, velocity, small attitude rotation, accelerometer and gyro biases). It predicts with the IMU and corrects with GPS, barometer, optical flow and magnetometer. Roll and pitch are observable through gravity, yaw through the magnetometer. Choose it with `scenario.fly(navigation="ekf")`: the controller then flies on the estimated attitude and angular rate too.
+
+**Wind rejection.** Thrust always points along the body z axis, so the accelerometer's body x and y readings can only come from aerodynamic forces. The filter turns them into a horizontal disturbance estimate, and `WindRejectionController` subtracts it from the commanded acceleration, cancelling gusts before a position error builds up.
 
 **The bench.** To test your own controller, write a class that inherits from `Controller` and implements `update(t, state, reference)`, which returns the 4 rotor thrusts. Then run `run_campaign(100, controller=MyController)`: the controller is built as `MyController(params, dt)`. The campaign draws random wind, gusts, GPS outages and mass errors, and the report gives the pass rate, the worst flight and its seed so you can replay it.
 

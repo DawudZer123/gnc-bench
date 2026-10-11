@@ -8,23 +8,32 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .controllers import HoverController
+from .controllers import HoverController, WindRejectionController
 from .dynamics import MOTORS, POS, initial_state
+from .ekf import NavigationEKF
 from .estimator import NavigationFilter
 from .faults import SensorFault
 from .metrics import tracking_report
 from .params import QuadParams
-from .sensors import GPS, IMU, Barometer, OpticalFlow
+from .sensors import GPS, IMU, Barometer, Magnetometer, OpticalFlow
 from .sim import simulate
 from .trajectories import figure_eight
 from .wind import Wind
 
-SENSOR_TYPES = {"imu": IMU, "gps": GPS, "baro": Barometer, "flow": OpticalFlow}
+SENSOR_TYPES = {"imu": IMU, "gps": GPS, "baro": Barometer, "flow": OpticalFlow,
+                "mag": Magnetometer}
+NAVIGATION = {"kf": NavigationFilter,   # attitude borrowed from the simulation (weeks 3-4)
+              "ekf": NavigationEKF}     # attitude estimated too, like a real autopilot
 
 
 def default_controller(params, dt):
     """The controller used when none is given: our cascaded PID + geometric attitude."""
     return HoverController(params, dt, ki=1.0)
+
+
+def wind_rejection_controller(params, dt):
+    """The same controller + wind compensation from the navigation filter."""
+    return WindRejectionController(params, dt, ki=1.0)
 
 
 @dataclass
@@ -62,17 +71,21 @@ class Scenario:
         return (self.outage_start, self.outage_start + self.outage_length)
 
     def fly(self, controller=default_controller, sensors=("imu", "gps", "baro", "flow"),
-            corridor=0.5, trajectory=figure_eight):
+            corridor=0.5, trajectory=figure_eight, navigation="kf"):
         """Flies this scenario and returns (SimResult, report).
 
         controller: any function (params, dt) -> Controller. A Controller class works too.
                     This is the plug-in point of the bench.
         sensors:    names of the sensors on board (see SENSOR_TYPES).
+        navigation: "kf" or "ekf" (see NAVIGATION). The EKF needs a compass for the yaw,
+                    so "mag" is added to the sensors if it is missing.
         The report only judges the GPS outage window.
         """
         nominal = QuadParams()                                   # what the controller believes
         true = QuadParams(mass=nominal.mass * (1 + self.mass_error))  # what actually flies
         rng = np.random.default_rng(self.seed)
+        if navigation == "ekf" and "mag" not in sensors:
+            sensors = (*sensors, "mag")
         x0 = initial_state(position=trajectory(0)["position"])
         x0[MOTORS] = true.mass * true.gravity / 4
         mean_wind = self.wind_speed * np.array([np.cos(self.wind_heading),
@@ -81,7 +94,7 @@ class Scenario:
             x0, controller(nominal, 0.004), trajectory, true, duration=self.duration,
             sensors=[SENSOR_TYPES[name](rng) for name in sensors],
             faults=[SensorFault("gps", start=self.outage[0], end=self.outage[1])],
-            estimator=NavigationFilter(nominal, p0=x0[POS]), use_estimate=True,
+            estimator=NAVIGATION[navigation](nominal, p0=x0[POS]), use_estimate=True,
             wind=Wind(np.random.default_rng(self.seed + 10), mean=mean_wind, gust_std=self.gust_std),
         )
         return res, tracking_report(res, trajectory, corridor, window=self.outage, params=true)
