@@ -58,7 +58,7 @@ Then, in VS Code: `Ctrl+Shift+P` (Mac: `Cmd+Shift+P`) > **Python: Select Interpr
 python -m pytest
 ```
 
-Expected result: `46 passed`. You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
+Expected result: `50 passed`. You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
 
 Then run the demos (press **F5** for the "Hover demo" configuration, or use the terminal):
 
@@ -75,6 +75,7 @@ Then run the demos (press **F5** for the "Hover demo" configuration, or use the 
 | `scripts/ekf_demo.py` | Full EKF: the drone flies on its estimated attitude (error < 0.5°) |
 | `scripts/ekf_campaign.py` | KF (true attitude) vs full EKF over 100 random flights |
 | `scripts/fault_detection_demo.py` | GPS frozen, jumping or drifting: EKF with and without fault detection |
+| `scripts/validate_flight_log.py` | Checks the models against a real PX4 log (`.ulg`); without a file, self-check on our simulator |
 | `scripts/flight3d_demo.py` | 3D view of a flight; `--animate` shows the drone flying, `--gif` saves it for the slides |
 
 Plots are saved in `outputs/`.
@@ -98,11 +99,12 @@ gnc-bench/
 │   ├── trajectories.py  reference trajectories (figure-8)
 │   ├── scenario.py      one flight's conditions; Scenario.random(seed); plug-in point for controllers
 │   ├── campaign.py      Monte Carlo campaigns in parallel + summary
+│   ├── flightlog.py     reads PX4 logs (NED/FRD -> ENU/FLU), sensor noise, EKF replay, drag fit
 │   ├── report.py        self-contained HTML campaign report
 │   ├── viz.py           3D flight view and drone animation
 │   └── sim.py           simulation loop (physics 500 Hz, controller 250 Hz)
 ├── scripts/             demos + plots
-├── tests/               46 validation tests
+├── tests/               50 validation tests
 └── .vscode/             VS Code settings (interpreter, tests, F5)
 ```
 
@@ -121,6 +123,8 @@ gnc-bench/
 **Full EKF.** `NavigationEKF` is an error-state EKF with 15 error states (position, velocity, small attitude rotation, accelerometer and gyro biases). It predicts with the IMU and corrects with GPS, barometer, optical flow and magnetometer. Roll and pitch are observable through gravity, yaw through the magnetometer. Choose it with `scenario.fly(navigation="ekf")`: the controller then flies on the estimated attitude and angular rate too.
 
 **Fault detection.** Before using a measurement, the EKF rejects exact repeats (a frozen sensor) and runs a χ² test on the innovation: if the measurement is too far from the prediction given the filter's own uncertainty (99.9 % gate), it is dropped. On normal flights this rejects about 0.1 % of measurements, as the theory predicts. It catches a frozen GPS and sudden jumps; a slow drift (spoofing) stays below the gate, which is the honest limit of this test. Switch it off with `navigation="ekf_naive"`.
+
+**Validation on real data.** `flightlog.py` reads a PX4 log and runs three checks: the noise of the real sensors at rest against our sensor models, our EKF replayed on the real sensor data against PX4's own EKF2, and the drag coefficient seen in flight against our dynamics model. The same checks run on our own simulator first (`from_simulation`), where the right answers are known. Reading `.ulg` files needs `pip install pyulog`.
 
 **Wind rejection.** Thrust always points along the body z axis, so the accelerometer's body x and y readings can only come from aerodynamic forces. The filter turns them into a horizontal disturbance estimate, and `WindRejectionController` subtracts it from the commanded acceleration, cancelling gusts before a position error builds up.
 

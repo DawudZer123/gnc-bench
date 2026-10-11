@@ -29,6 +29,25 @@ def quat_to_rotmat(q):
     ])
 
 
+def rotmat_to_quat(R):
+    """Rotation matrix -> quaternion [w, x, y, z] (Shepperd's method, numerically safe)."""
+    tr = np.trace(R)
+    if tr > 0:
+        s = 2.0 * np.sqrt(tr + 1.0)
+        q = [0.25 * s, (R[2, 1] - R[1, 2]) / s, (R[0, 2] - R[2, 0]) / s, (R[1, 0] - R[0, 1]) / s]
+    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+        s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+        q = [(R[2, 1] - R[1, 2]) / s, 0.25 * s, (R[0, 1] + R[1, 0]) / s, (R[0, 2] + R[2, 0]) / s]
+    elif R[1, 1] > R[2, 2]:
+        s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+        q = [(R[0, 2] - R[2, 0]) / s, (R[0, 1] + R[1, 0]) / s, 0.25 * s, (R[1, 2] + R[2, 1]) / s]
+    else:
+        s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+        q = [(R[1, 0] - R[0, 1]) / s, (R[0, 2] + R[2, 0]) / s, (R[1, 2] + R[2, 1]) / s, 0.25 * s]
+    q = np.array(q)
+    return q / np.linalg.norm(q) * np.sign(q[0] if q[0] != 0 else 1.0)
+
+
 def quat_from_euler(roll, pitch, yaw):
     """ZYX Euler angles (yaw, pitch, roll) in radians -> quaternion."""
     cr, sr = np.cos(roll / 2), np.sin(roll / 2)
