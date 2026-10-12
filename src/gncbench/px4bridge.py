@@ -74,7 +74,9 @@ class SensorNoise:
     gps_white: float = 0.05  # m, fast receiver noise on top
     flow: float = 0.02       # rad/s, optical flow angular rate
     range: float = 0.02      # m, downward rangefinder
-    baro_walk: float = 0.0   # m/√s, slow barometer drift (random walk; temperature, airflow)
+    baro_walk: float = 0.0   # m/√s, barometer drift in flight (random walk; prop wash, heating)
+    accel_flight: float = 0.0  # m/s², extra vibration while the motors spin
+    gyro_flight: float = 0.0   # rad/s
     gps_vel: float = 0.05    # m/s
 
 
@@ -214,10 +216,13 @@ class Px4Bridge:
     def _send_sensors(self, k):
         n, rng = self.noise, self.rng
         R = quat_to_rotmat(self.x[QUAT])
-        accel = FRD_TO_FLU @ (self._specific_force_flu() + self.accel_bias + rng.normal(0, n.accel, 3))
-        gyro = FRD_TO_FLU @ (self.x[OMEGA] + self.gyro_bias + rng.normal(0, n.gyro, 3))
+        spinning = float(np.mean(np.nan_to_num(self.u))) > 0.05     # vibration and baro drift need the motors on
+        sa = np.hypot(n.accel, n.accel_flight) if spinning else n.accel
+        sg = np.hypot(n.gyro, n.gyro_flight) if spinning else n.gyro
+        accel = FRD_TO_FLU @ (self._specific_force_flu() + self.accel_bias + rng.normal(0, sa, 3))
+        gyro = FRD_TO_FLU @ (self.x[OMEGA] + self.gyro_bias + rng.normal(0, sg, 3))
         mag = FRD_TO_FLU @ (R.T @ self.field_enu + rng.normal(0, n.mag, 3))
-        if n.baro_walk and k % 5 == 0:
+        if n.baro_walk and spinning and k % 5 == 0:
             self.baro_bias += rng.normal(0, n.baro_walk * np.sqrt(5 * self.dt))
         altitude = self.home.alt + self.x[POS][2] + self.baro_bias + rng.normal(0, n.baro)
         pressure, temperature = pressure_at(altitude)

@@ -60,7 +60,7 @@ Then, in VS Code: `Ctrl+Shift+P` (Mac: `Cmd+Shift+P`) > **Python: Select Interpr
 python -m pytest
 ```
 
-Expected result: `63 passed` (the 7 PX4 bridge tests need `pip install -e ".[px4]"`; without it they are skipped). You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
+Expected result: `64 passed` (the 7 PX4 bridge tests need `pip install -e ".[px4]"`; without it they are skipped). You can also open the **Testing** tab (flask icon) in VS Code and click ▶.
 
 Then run the demos (press **F5** for the "Hover demo" configuration, or use the terminal):
 
@@ -114,7 +114,7 @@ gnc-bench/
 │   ├── viz.py           3D flight view and drone animation
 │   └── sim.py           simulation loop (physics 500 Hz, controller 250 Hz)
 ├── scripts/             demos + plots
-├── tests/               63 validation tests
+├── tests/               64 validation tests
 └── .vscode/             VS Code settings (interpreter, tests, F5)
 ```
 
@@ -215,6 +215,7 @@ A flight log contains much more than the trajectory: the motor commands, the bat
 pip install -e ".[px4,logs]"
 python scripts/build_twin.py my_flight.ulg --mass 1.8 --arm 0.24   # writes outputs/twin.json, twin.png
 python scripts/twin_replay.py my_flight.ulg                        # writes outputs/twin_replay.png
+python scripts/twin_campaign.py 100 4 --inertia 0.5 2              # your drone under GPS loss
 ```
 
 `build_twin.py` prints what it found and what it could not find. `twin_replay.py` flies the mission recorded in the log twice on PX4 SITL, at the same time: once on the twin, once on the generic Iris, and compares both with the real flight.
@@ -226,7 +227,7 @@ python scripts/twin_replay.py my_flight.ulg                        # writes outp
 - The centre of gravity, from which motors work harder in hover.
 - The yaw torque imbalance between clockwise and counter-clockwise propellers.
 - Horizontal drag.
-- Accelerometer and gyro vibration in flight, which is 50 to 100 times the noise at rest.
+- Accelerometer and gyro vibration in flight, which is 50 to 100 times the noise at rest. Most of it is at the propeller frequency (about 90 Hz on this drone), which PX4's low-pass filters remove, so the twin feeds PX4 SITL only the part inside the filter band (0.56 m/s² instead of 1 m/s²), and only while the motors spin. Feeding the full level made PX4 refuse to arm and the twin unable to take off.
 - Barometer drift.
 
 The thrust gain only gives ratios. `--mass` and `--arm` set the scale, so give the real values if you know them.
@@ -245,9 +246,27 @@ The thrust gain only gives ratios. `--mass` and `--arm` set the scale, so give t
 | Replay of the real mission on PX4 | throttle error (RMS) | motor balance error (RMS) |
 | --- | --- | --- |
 | Generic Iris | 0.199 | 0.198 |
-| Twin | 0.013 | 0.004 |
+| Twin | 0.010 | 0.004 |
 
 The twin reproduces the throttle rising from 0.70 to 0.75 as the battery drains, and the uneven motors.
 
 **Honest limit.** This comparison is in-sample: the twin was identified from the same flight it replays. The real test is a second log of the same drone, which the twin has never seen.
+
+### Your drone under GPS loss
+
+`twin_campaign.py` flies the same 100 random GPS-loss flights as section 7, but on the twin, with PX4 running the drone's own tuning. `--inertia` repeats the optical flow campaign with the inertia halved and doubled, because the inertia is a prior and the answer must not depend on it.
+
+| 100 flights per version | pass | mission completed | median worst error |
+| --- | --- | --- | --- |
+| Generic Iris, GPS only (section 7) | 3 % | 3 % | 4.3 m |
+| **Your drone, GPS only** | 1 % | 3 % | 5.1 m |
+| Generic Iris + optical flow (section 7) | 98 % | 99 % | 0.72 m |
+| **Your drone + optical flow** | 98 % | 100 % | 0.67 m |
+| Your drone + flow, inertia × 0.5 | 97 % | 99 % | 0.70 m |
+| Your drone + flow, inertia × 2 | 95 % | 99 % | 0.71 m |
+
+- With its current configuration, this drone cannot fly through a GPS outage longer than about 5 s: EKF2 declares the position lost 5–6 s after the GPS goes, and PX4 lands where it is.
+- A downward optical flow camera and rangefinder would make the same drone fly through 15 s outages in 98 % of the flights. Its weaker thrust margin, battery fade and vibration do not change that.
+- Halving or doubling the unknown inertia moves the pass rate by 1 to 3 points: the conclusion holds even though the inertia is not identified.
+- Limit: the twin's flow sensor is our model of one (section 7), not a sensor measured on this drone, and the ground is assumed textured enough for flow to work.
 

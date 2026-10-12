@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from gncbench.twin import (Battery, DigitalTwin, TwinData, first_order_lag, fit_balance,
-                           fit_rotation, fit_thrust, px4_mixer)
+                           fit_rotation, fit_thrust, fit_vibration, px4_mixer)
 
 QUAD_X = {}
 for i, (px, py, km) in enumerate([(1, 1, 0.05), (-1, -1, 0.05), (1, -1, -0.05), (-1, 1, -0.05)]):
@@ -93,3 +93,15 @@ def test_battery_voltage_and_thrust_fade():
         scale = b.step(0.5, 0.004)
     assert b.drawn_mah == pytest.approx(250.0, rel=1e-3)
     assert scale == pytest.approx((16.0 - 0.25) / 16.0, rel=1e-3)
+
+
+def test_vibration_keeps_only_what_px4_filters_let_through():
+    # 90 Hz propeller vibration (removed by PX4's 30 Hz filters) on top of white noise.
+    n, fs = 40000, 400.0
+    rng = np.random.default_rng(3)
+    t = np.arange(n) / fs
+    white = rng.normal(0, 0.2, (n, 6))
+    imu = white + 1.5 * np.sin(2 * np.pi * 90 * t)[:, None]
+    fit = fit_vibration(synthetic(n=n, imu_t=t, imu=imu), cutoff=30.0, sim_rate=fs)
+    assert np.mean(fit["accel"]) > 1.0                                   # total: dominated by 90 Hz
+    assert np.mean(fit["accel_sim"]) == pytest.approx(0.2, rel=0.1)       # in band: the white part

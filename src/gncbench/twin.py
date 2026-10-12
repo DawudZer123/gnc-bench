@@ -254,11 +254,24 @@ def fit_rotation(d, mixer, min_rate_std=0.3, lags=(0.0, 0.02, 0.04, 0.06, 0.08, 
     return out
 
 
-def fit_vibration(d, n=16):
-    """IMU noise in flight: the part of the signal faster than ~10 Hz (motor vibration)."""
+def fit_vibration(d, n=16, cutoff=30.0, sim_rate=250.0):
+    """IMU vibration in flight (motors spinning).
+
+    `accel`/`gyro`: everything faster than ~10 Hz, as a pilot would quote it. Most of it is at
+    the propeller frequency (~90 Hz here), which PX4's low-pass filters (IMU_*_CUTOFF, `cutoff`)
+    remove. What reaches the controllers and EKF2 is the 10 Hz - cutoff band, so the twin
+    replays THAT: `accel_sim`/`gyro_sim` are the white-noise levels at the simulator's
+    `sim_rate` with the same energy in that band.
+    """
+    from scipy.signal import butter, sosfiltfilt
+
     hf = d.imu - smooth(d.imu, n)
     std = hf[n:-n].std(axis=0)
-    return {"accel": std[:3].tolist(), "gyro": std[3:].tolist()}
+    fs = 1.0 / np.median(np.diff(d.imu_t))
+    band = sosfiltfilt(butter(4, [10.0, cutoff], btype="band", fs=fs, output="sos"), d.imu, axis=0)
+    in_band = band[n:-n].std(axis=0) * np.sqrt((sim_rate / 2) / (cutoff - 10.0))
+    return {"accel": std[:3].tolist(), "gyro": std[3:].tolist(),
+            "accel_sim": in_band[:3].tolist(), "gyro_sim": in_band[3:].tolist()}
 
 
 def fit_baro(d):
@@ -330,8 +343,9 @@ class DigitalTwin:
 
     def sensor_noise(self):
         """Sensor models with the vibration and baro drift seen in flight."""
-        return SensorNoise(accel=float(np.mean(self.vibration["accel"])),
-                           gyro=float(np.mean(self.vibration["gyro"])),
+        v = self.vibration
+        return SensorNoise(accel_flight=float(np.mean(v.get("accel_sim", v["accel"]))),
+                           gyro_flight=float(np.mean(v.get("gyro_sim", v["gyro"]))),
                            baro_walk=self.baro.get("walk") or 0.0)
 
     def battery_model(self):
@@ -404,7 +418,7 @@ def build_twin(path):
     return DigitalTwin(
         source=Path(path).name, hardware=d.hardware, airframe=d.airframe,
         thrust=fit_thrust(d), battery=fit_battery(d), balance=fit_balance(d, mixer),
-        rotation=fit_rotation(d, mixer), drag=drag, vibration=fit_vibration(d), baro=fit_baro(d),
+        rotation=fit_rotation(d, mixer), drag=drag, vibration=fit_vibration(d, cutoff=d.params.get("IMU_GYRO_CUTOFF", 30.0)), baro=fit_baro(d),
         px4_params=px4_params_to_copy(d.params))
 
 

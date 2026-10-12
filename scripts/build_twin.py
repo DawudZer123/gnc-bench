@@ -60,6 +60,8 @@ def main():
     print("SENSORS IN FLIGHT")
     print(f"  accelerometer vibration : {np.round(twin.vibration['accel'], 2)} m/s² (at rest ~0.015)")
     print(f"  gyro vibration          : {np.round(twin.vibration['gyro'], 3)} rad/s")
+    print(f"  after PX4's IMU filters : accel {np.mean(twin.vibration['accel_sim']):.2f} m/s², gyro "
+          f"{np.mean(twin.vibration['gyro_sim']):.3f} rad/s (white-noise equivalent fed to PX4 SITL)")
     if twin.baro["total_drift_m"] is not None:
         print(f"  barometer drift         : {twin.baro['total_drift_m']:+.1f} m over the flight")
     print(f"\nPX4 configuration copied : {len(twin.px4_params)} parameters (gains, filters, geometry)")

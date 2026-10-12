@@ -34,11 +34,15 @@ class Px4Scenario:
     fault_length: float = 15.0
     fault_value: tuple = ()
     flow: bool = False
+    twin: str = ""                   # path to a twin.json: fly that drone instead of the Iris
+    inertia_scale: float = 1.0       # multiplies the twin's inertia (it is often a prior)
+    mass: float = 1.8
+    arm: float = 0.24
 
     @classmethod
-    def random(cls, seed, duration=30.0, flow=False):
+    def random(cls, seed, duration=30.0, flow=False, **drone):
         rng = np.random.default_rng(seed + 100_000)
-        return cls(seed=seed, duration=duration, flow=flow,
+        return cls(seed=seed, duration=duration, flow=flow, **drone,
                    wind_speed=float(rng.uniform(0, 6)), wind_heading=float(rng.uniform(0, 360)),
                    gust_std=float(rng.uniform(0, 2)),
                    fault_start=float(rng.uniform(0.15, 0.4) * duration),
@@ -49,6 +53,18 @@ class Px4Scenario:
             return []
         return [SensorFault("gps", self.fault_start, self.fault_start + self.fault_length,
                             self.gps_fault, tuple(self.fault_value))]
+
+    def drone(self):
+        """fly_px4 arguments for the drone: nothing for the Iris, the twin's models otherwise."""
+        if not self.twin:
+            return {}
+        from .twin import DigitalTwin
+
+        twin = DigitalTwin.load(self.twin)
+        params = twin.quad_params(self.mass, self.arm)
+        params.inertia = params.inertia * self.inertia_scale
+        return {"params": params, "px4_params": twin.px4_params, "noise": twin.sensor_noise(),
+                "battery": twin.battery_model()}
 
 
 def flight_report(flight, scenario, corridor=1.0):
@@ -104,7 +120,8 @@ def _fly_one(args):
             flight = fly_px4(duration=scenario.duration, seed=scenario.seed,
                              wind_speed=scenario.wind_speed, wind_heading=scenario.wind_heading,
                              gust_std=scenario.gust_std, faults=scenario.faults(),
-                             flow=scenario.flow, instance=_instance, px4_dir=px4_dir)
+                             flow=scenario.flow, instance=_instance, px4_dir=px4_dir,
+                             **scenario.drone())
             return flight_report(flight, scenario, corridor)
         except (TimeoutError, ConnectionError, OSError, RuntimeError) as exc:
             error = exc
